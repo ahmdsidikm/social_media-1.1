@@ -1,0 +1,284 @@
+-- ============================================
+-- SQL UNTUK MEMBUAT DATABASE MEDIA SOSIAL
+-- Jalankan SQL ini di Supabase SQL Editor
+-- ============================================
+
+-- 1. Tabel Users (Profil Pengguna)
+CREATE TABLE IF NOT EXISTS users (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  password TEXT NOT NULL DEFAULT '',
+  avatar_url TEXT DEFAULT '',
+  cover_url TEXT DEFAULT '',
+  bio TEXT DEFAULT '',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 2. Tabel Posts (Status/Postingan)
+CREATE TABLE IF NOT EXISTS posts (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL DEFAULT '',
+  image_url TEXT DEFAULT '',
+  video_url TEXT DEFAULT '',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 3. Tabel Likes
+CREATE TABLE IF NOT EXISTS likes (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  post_id UUID REFERENCES posts(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(post_id, user_id)
+);
+
+-- 4. Tabel Comments (Komentar)
+CREATE TABLE IF NOT EXISTS comments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  post_id UUID REFERENCES posts(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 5. Tabel Followers (Sistem Follow)
+CREATE TABLE IF NOT EXISTS followers (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  follower_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  following_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(follower_id, following_id),
+  CHECK (follower_id != following_id)
+);
+
+-- 6. Tabel Messages (Pesan Pribadi)
+CREATE TABLE IF NOT EXISTS messages (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  sender_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  receiver_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL DEFAULT '',
+  image_url TEXT DEFAULT '',
+  is_read BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 7. Tabel Groups (Grup)
+CREATE TABLE IF NOT EXISTS groups (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  image_url TEXT DEFAULT '',
+  creator_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 8. Tabel Group Members
+CREATE TABLE IF NOT EXISTS group_members (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT DEFAULT 'member',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(group_id, user_id)
+);
+
+-- 9. Tabel Group Messages (Pesan Grup)
+CREATE TABLE IF NOT EXISTS group_messages (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL DEFAULT '',
+  image_url TEXT DEFAULT '',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 10. Tabel Stories
+CREATE TABLE IF NOT EXISTS stories (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  image_url TEXT NOT NULL,
+  caption TEXT DEFAULT '',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  expires_at TIMESTAMP WITH TIME ZONE DEFAULT (NOW() + INTERVAL '24 hours')
+);
+
+-- 11. Enable Row Level Security (RLS)
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE likes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE followers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE group_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE group_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stories ENABLE ROW LEVEL SECURITY;
+
+-- 12. Policies - Drop existing policies first, then create
+DO $$ BEGIN
+  -- Users
+  DROP POLICY IF EXISTS "Allow public read users" ON users;
+  DROP POLICY IF EXISTS "Allow public insert users" ON users;
+  DROP POLICY IF EXISTS "Allow public update users" ON users;
+  DROP POLICY IF EXISTS "Allow public delete users" ON users;
+  -- Posts
+  DROP POLICY IF EXISTS "Allow public read posts" ON posts;
+  DROP POLICY IF EXISTS "Allow public insert posts" ON posts;
+  DROP POLICY IF EXISTS "Allow public update posts" ON posts;
+  DROP POLICY IF EXISTS "Allow public delete posts" ON posts;
+  -- Likes
+  DROP POLICY IF EXISTS "Allow public read likes" ON likes;
+  DROP POLICY IF EXISTS "Allow public insert likes" ON likes;
+  DROP POLICY IF EXISTS "Allow public delete likes" ON likes;
+  -- Comments
+  DROP POLICY IF EXISTS "Allow public read comments" ON comments;
+  DROP POLICY IF EXISTS "Allow public insert comments" ON comments;
+  DROP POLICY IF EXISTS "Allow public delete comments" ON comments;
+  -- Followers
+  DROP POLICY IF EXISTS "Allow public read followers" ON followers;
+  DROP POLICY IF EXISTS "Allow public insert followers" ON followers;
+  DROP POLICY IF EXISTS "Allow public delete followers" ON followers;
+  -- Messages
+  DROP POLICY IF EXISTS "Allow public read messages" ON messages;
+  DROP POLICY IF EXISTS "Allow public insert messages" ON messages;
+  DROP POLICY IF EXISTS "Allow public update messages" ON messages;
+  DROP POLICY IF EXISTS "Allow public delete messages" ON messages;
+  -- Groups
+  DROP POLICY IF EXISTS "Allow public read groups" ON groups;
+  DROP POLICY IF EXISTS "Allow public insert groups" ON groups;
+  DROP POLICY IF EXISTS "Allow public update groups" ON groups;
+  DROP POLICY IF EXISTS "Allow public delete groups" ON groups;
+  -- Group Members
+  DROP POLICY IF EXISTS "Allow public read group_members" ON group_members;
+  DROP POLICY IF EXISTS "Allow public insert group_members" ON group_members;
+  DROP POLICY IF EXISTS "Allow public delete group_members" ON group_members;
+  -- Group Messages
+  DROP POLICY IF EXISTS "Allow public read group_messages" ON group_messages;
+  DROP POLICY IF EXISTS "Allow public insert group_messages" ON group_messages;
+  DROP POLICY IF EXISTS "Allow public delete group_messages" ON group_messages;
+  -- Stories
+  DROP POLICY IF EXISTS "Allow public read stories" ON stories;
+  DROP POLICY IF EXISTS "Allow public insert stories" ON stories;
+  DROP POLICY IF EXISTS "Allow public delete stories" ON stories;
+END $$;
+
+-- Users policies
+CREATE POLICY "Allow public read users" ON users FOR SELECT USING (true);
+CREATE POLICY "Allow public insert users" ON users FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update users" ON users FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete users" ON users FOR DELETE USING (true);
+
+-- Posts policies
+CREATE POLICY "Allow public read posts" ON posts FOR SELECT USING (true);
+CREATE POLICY "Allow public insert posts" ON posts FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update posts" ON posts FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete posts" ON posts FOR DELETE USING (true);
+
+-- Likes policies
+CREATE POLICY "Allow public read likes" ON likes FOR SELECT USING (true);
+CREATE POLICY "Allow public insert likes" ON likes FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public delete likes" ON likes FOR DELETE USING (true);
+
+-- Comments policies
+CREATE POLICY "Allow public read comments" ON comments FOR SELECT USING (true);
+CREATE POLICY "Allow public insert comments" ON comments FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public delete comments" ON comments FOR DELETE USING (true);
+
+-- Followers policies
+CREATE POLICY "Allow public read followers" ON followers FOR SELECT USING (true);
+CREATE POLICY "Allow public insert followers" ON followers FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public delete followers" ON followers FOR DELETE USING (true);
+
+-- Messages policies
+CREATE POLICY "Allow public read messages" ON messages FOR SELECT USING (true);
+CREATE POLICY "Allow public insert messages" ON messages FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update messages" ON messages FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete messages" ON messages FOR DELETE USING (true);
+
+-- Groups policies
+CREATE POLICY "Allow public read groups" ON groups FOR SELECT USING (true);
+CREATE POLICY "Allow public insert groups" ON groups FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update groups" ON groups FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete groups" ON groups FOR DELETE USING (true);
+
+-- Group Members policies
+CREATE POLICY "Allow public read group_members" ON group_members FOR SELECT USING (true);
+CREATE POLICY "Allow public insert group_members" ON group_members FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public delete group_members" ON group_members FOR DELETE USING (true);
+
+-- Group Messages policies
+CREATE POLICY "Allow public read group_messages" ON group_messages FOR SELECT USING (true);
+CREATE POLICY "Allow public insert group_messages" ON group_messages FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public delete group_messages" ON group_messages FOR DELETE USING (true);
+
+-- Stories policies
+CREATE POLICY "Allow public read stories" ON stories FOR SELECT USING (true);
+CREATE POLICY "Allow public insert stories" ON stories FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public delete stories" ON stories FOR DELETE USING (true);
+
+-- 13. Buat Storage Bucket untuk upload
+INSERT INTO storage.buckets (id, name, public) VALUES ('posts', 'posts', true) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('avatars', 'avatars', true) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('covers', 'covers', true) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('messages', 'messages', true) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('stories', 'stories', true) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('groups', 'groups', true) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('videos', 'videos', true) ON CONFLICT (id) DO NOTHING;
+
+-- 14. Storage Policies - Drop existing first
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Allow public upload posts" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public read posts storage" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public delete posts storage" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public upload avatars" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public read avatars storage" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public delete avatars storage" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public upload covers" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public read covers" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public delete covers" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public upload messages storage" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public read messages storage" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public upload stories storage" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public read stories storage" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public delete stories storage" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public upload groups storage" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public read groups storage" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public upload videos" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow public read videos" ON storage.objects;
+  DROP POLICY IF EXISTS "Allow all storage" ON storage.objects;
+END $$;
+
+-- Simple storage policy: allow all operations on all buckets
+CREATE POLICY "Allow all storage" ON storage.objects
+  FOR ALL USING (true) WITH CHECK (true);
+
+-- 15. Index untuk performa
+CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id);
+CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_likes_post_id ON likes(post_id);
+CREATE INDEX IF NOT EXISTS idx_likes_user_id ON likes(user_id);
+CREATE INDEX IF NOT EXISTS idx_likes_post_user ON likes(post_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
+CREATE INDEX IF NOT EXISTS idx_comments_user_id ON comments(user_id);
+CREATE INDEX IF NOT EXISTS idx_followers_follower_id ON followers(follower_id);
+CREATE INDEX IF NOT EXISTS idx_followers_following_id ON followers(following_id);
+CREATE INDEX IF NOT EXISTS idx_followers_pair ON followers(follower_id, following_id);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
+CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_group_messages_group ON group_messages(group_id);
+CREATE INDEX IF NOT EXISTS idx_stories_user ON stories(user_id);
+CREATE INDEX IF NOT EXISTS idx_stories_expires ON stories(expires_at);
+
+-- 16. Function to auto-delete expired stories
+CREATE OR REPLACE FUNCTION delete_expired_stories()
+RETURNS void AS $$
+BEGIN
+  DELETE FROM stories WHERE expires_at < NOW();
+END;
+$$ LANGUAGE plpgsql;
