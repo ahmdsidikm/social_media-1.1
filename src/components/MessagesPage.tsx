@@ -18,14 +18,26 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const [imgFile, setImgFile] = useState<File | null>(null);
   const [imgPreview, setImgPreview] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const prevMessageCountRef = useRef<number>(0);
+  const isNearBottomRef = useRef<boolean>(true);
+  const isInitialLoadRef = useRef<boolean>(true);
 
   useEffect(() => {
     if (chatTarget) setSelectedUser(chatTarget);
   }, [chatTarget]);
+
+  const handleScroll = useCallback(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+    const threshold = 150;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    isNearBottomRef.current = distanceFromBottom <= threshold;
+  }, []);
 
   const fetchContacts = useCallback(async () => {
     const { data: following } = await supabase
@@ -124,6 +136,14 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
   }, [selectedUser, currentUser.id]);
 
   useEffect(() => {
+    if (selectedUser) {
+      isInitialLoadRef.current = true;
+      prevMessageCountRef.current = 0;
+      isNearBottomRef.current = true;
+    }
+  }, [selectedUser]);
+
+  useEffect(() => {
     fetchContacts();
   }, [fetchContacts]);
 
@@ -134,12 +154,34 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
   }, [fetchMessages]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    const prevCount = prevMessageCountRef.current;
+    const currentCount = messages.length;
+
+    if (currentCount === 0) {
+      prevMessageCountRef.current = 0;
+      return;
+    }
+
+    const hasNewMessages = currentCount > prevCount;
+    const lastMessage = messages[messages.length - 1];
+    const isMyLastMessage = lastMessage?.sender_id === currentUser.id;
+
+    if (isInitialLoadRef.current && currentCount > 0) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      isInitialLoadRef.current = false;
+    } else if (hasNewMessages && isMyLastMessage) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else if (hasNewMessages && isNearBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    prevMessageCountRef.current = currentCount;
+  }, [messages, currentUser.id]);
 
   const handleSend = async () => {
     if ((!newMsg.trim() && !imgFile) || !selectedUser) return;
     setSending(true);
+    isNearBottomRef.current = true;
 
     let imageUrl = '';
     if (imgFile) {
@@ -182,12 +224,12 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
     u.username.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Chat view
+  // Chat view - Full fixed layout
   if (selectedUser) {
     return (
-      <div className="flex flex-col bg-white" style={{ height: 'calc(100vh - 64px)' }}>
-        {/* Chat header */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white sticky top-0 z-10 shadow-sm">
+      <div className="fixed inset-0 flex flex-col bg-white md:left-56 lg:left-64">
+        {/* Chat header - Fixed top */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white z-10 shadow-sm flex-shrink-0">
           <button
             onClick={() => { setSelectedUser(null); onClearTarget?.(); }}
             className="flex items-center justify-center h-8 w-8 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
@@ -209,8 +251,13 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
           </div>
         </div>
 
-        {/* Messages area */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={{ background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)' }}>
+        {/* Messages area - Scrollable middle */}
+        <div
+          ref={chatContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto px-4 py-4 space-y-3"
+          style={{ background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)' }}
+        >
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <div className="h-16 w-16 rounded-full bg-blue-50 flex items-center justify-center mb-4">
@@ -224,9 +271,9 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
           )}
           {messages.map((msg, idx) => {
             const isMine = msg.sender_id === currentUser.id;
-            const showTime = idx === 0 || 
+            const showTime = idx === 0 ||
               new Date(msg.created_at).getTime() - new Date(messages[idx - 1].created_at).getTime() > 300000;
-            
+
             return (
               <div key={msg.id}>
                 {showTime && (
@@ -273,9 +320,9 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Image preview */}
+        {/* Image preview - Fixed above input */}
         {imgPreview && (
-          <div className="bg-white px-4 py-3 border-t border-gray-100">
+          <div className="bg-white px-4 py-3 border-t border-gray-100 flex-shrink-0">
             <div className="relative inline-block">
               <img src={imgPreview} alt="" className="h-24 rounded-xl object-cover shadow-sm" />
               <button
@@ -288,41 +335,46 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
           </div>
         )}
 
-        {/* Input area - pushed down with padding */}
-        <div className="bg-white border-t border-gray-200 px-3 py-3 pb-[env(safe-area-inset-bottom,12px)]">
-          <div className="flex items-end gap-2">
-            <input ref={fileRef} type="file" accept="image/*" onChange={handleImgSelect} className="hidden" />
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="flex items-center justify-center h-10 w-10 rounded-full text-gray-400 hover:text-blue-500 hover:bg-blue-50 transition-colors flex-shrink-0 mb-0.5"
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-            </button>
-            <div className="flex-1 relative">
-              <input
-                type="text"
-                value={newMsg}
-                onChange={(e) => setNewMsg(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-                placeholder="Tulis pesan..."
-                className="w-full rounded-full border border-gray-200 bg-gray-50 px-4 py-2.5 pr-4 text-sm text-gray-800 placeholder-gray-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:bg-white transition-all"
-              />
-            </div>
-            <button
-              onClick={handleSend}
-              disabled={sending || (!newMsg.trim() && !imgFile)}
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0 shadow-sm mb-0.5 active:scale-95"
-            >
-              {sending ? (
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              ) : (
-                <svg className="h-4 w-4 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+        {/* Input area - Fixed bottom, above mobile sidebar */}
+        <div className="bg-white border-t border-gray-200 px-3 py-3 flex-shrink-0 mb-[env(safe-area-inset-bottom,0px)] md:mb-0"
+          style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}
+        >
+          {/* Mobile: extra bottom padding for sidebar */}
+          <div className="pb-14 md:pb-0">
+            <div className="flex items-end gap-2">
+              <input ref={fileRef} type="file" accept="image/*" onChange={handleImgSelect} className="hidden" />
+              <button
+                onClick={() => fileRef.current?.click()}
+                className="flex items-center justify-center h-10 w-10 rounded-full text-gray-400 hover:text-blue-500 hover:bg-blue-50 transition-colors flex-shrink-0 mb-0.5"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
-              )}
-            </button>
+              </button>
+              <div className="flex-1 relative">
+                <input
+                  type="text"
+                  value={newMsg}
+                  onChange={(e) => setNewMsg(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+                  placeholder="Tulis pesan..."
+                  className="w-full rounded-full border border-gray-200 bg-gray-50 px-4 py-2.5 pr-4 text-sm text-gray-800 placeholder-gray-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:bg-white transition-all"
+                />
+              </div>
+              <button
+                onClick={handleSend}
+                disabled={sending || (!newMsg.trim() && !imgFile)}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0 shadow-sm mb-0.5 active:scale-95"
+              >
+                {sending ? (
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                ) : (
+                  <svg className="h-4 w-4 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -332,12 +384,9 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
   // Contacts list
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-white px-4 pt-4 pb-3 border-b border-gray-100">
         <h1 className="text-xl font-bold text-gray-900">Pesan</h1>
         <p className="text-xs text-gray-400 mt-0.5">Kirim pesan ke orang yang kamu ikuti</p>
-        
-        {/* Search bar */}
         <div className="mt-3 relative">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -372,7 +421,7 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
           <p className="text-sm text-gray-400">Tidak ada kontak ditemukan</p>
         </div>
       ) : (
-        <div className="divide-y divide-gray-50">
+        <div className="divide-y divide-gray-50 pb-20 md:pb-0">
           {filteredContacts.map((user) => (
             <button
               key={user.id}
