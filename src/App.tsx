@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './lib/supabase';
 import type { User, Post, Like } from './lib/supabase';
 import { HomePage } from './components/HomePage';
@@ -20,6 +20,7 @@ export function App() {
   const [chatTarget, setChatTarget] = useState<User | null>(null);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [unreadGroups, setUnreadGroups] = useState(0);
+  const mainContentRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const savedUserId = localStorage.getItem('sosmedku_user_id');
@@ -211,6 +212,36 @@ export function App() {
     }
   }, [currentPage]);
 
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    // Also scroll any scrollable child containers
+    const scrollableElements = document.querySelectorAll('[data-scroll-container]');
+    scrollableElements.forEach((el) => {
+      el.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  };
+
+  const handleNavClick = (page: Page) => {
+    if (currentPage === page) {
+      // Same page pressed — scroll to top and reset sub-views
+      scrollToTop();
+      if (page === 'profile') {
+        setViewingUser(null);
+      }
+      if (page === 'messages') {
+        setChatTarget(null);
+      }
+    } else {
+      // Different page — navigate
+      setCurrentPage(page);
+      if (page === 'profile') setViewingUser(null);
+      if (page !== 'messages') setChatTarget(null);
+    }
+  };
+
   const handleLogin = (user: User) => {
     setCurrentUser(user);
     localStorage.setItem('sosmedku_user_id', user.id);
@@ -366,11 +397,7 @@ export function App() {
             {[...navItemsBase, profileNavItem].map((item) => (
               <button
                 key={item.page}
-                onClick={() => {
-                  setCurrentPage(item.page);
-                  if (item.page === 'profile') setViewingUser(null);
-                  if (item.page !== 'messages') setChatTarget(null);
-                }}
+                onClick={() => handleNavClick(item.page)}
                 className={`relative flex flex-col items-center gap-0.5 px-3 py-2 rounded-2xl text-[10px] font-medium transition-all duration-300 ${
                   currentPage === item.page
                     ? 'text-blue-600'
@@ -409,10 +436,7 @@ export function App() {
             {navItemsBase.map((item) => (
               <button
                 key={item.page}
-                onClick={() => {
-                  setCurrentPage(item.page);
-                  if (item.page !== 'messages') setChatTarget(null);
-                }}
+                onClick={() => handleNavClick(item.page)}
                 className={`relative flex flex-row items-center gap-3 py-2.5 px-3 rounded-xl text-sm font-medium transition-all w-full ${
                   currentPage === item.page
                     ? 'text-blue-600 bg-blue-50'
@@ -436,10 +460,7 @@ export function App() {
           {/* Profile Button Desktop */}
           <div className="border-t border-gray-100">
             <button
-              onClick={() => {
-                setViewingUser(null);
-                setCurrentPage('profile');
-              }}
+              onClick={() => handleNavClick('profile')}
               className={`flex items-center gap-3 w-full px-4 py-3.5 transition-all duration-200 hover:bg-gray-50 ${
                 currentPage === 'profile' ? 'bg-blue-50' : ''
               }`}
@@ -487,7 +508,7 @@ export function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="pb-20 md:pb-0 md:ml-56 lg:ml-64 min-h-screen">
+      <main ref={mainContentRef} className="pb-20 md:pb-0 md:ml-56 lg:ml-64 min-h-screen">
         <div className="h-full w-full">
           {currentPage === 'home' && (
             <HomePage
