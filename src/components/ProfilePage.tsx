@@ -49,6 +49,7 @@ export function ProfilePage({
   const [stories, setStories] = useState<Story[]>([]);
   const [coverUploading, setCoverUploading] = useState(false);
   const [selectedPhotoPost, setSelectedPhotoPost] = useState<Post | null>(null);
+  const [cropPostImage, setCropPostImage] = useState<string | null>(null); // ✅ NEW
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const postFileRef = useRef<HTMLInputElement>(null);
@@ -243,16 +244,27 @@ export function ProfilePage({
     onRefreshPosts();
   };
 
+  // ✅ MODIFIED: Buka cropper 4:5 dulu, bukan langsung preview
   const handlePostImg = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setPostImgFile(file);
+      if (!file.type.startsWith('image/')) { alert('Hanya file gambar'); return; }
+      if (file.size > 10 * 1024 * 1024) { alert('Max 10MB'); return; }
       const r = new FileReader();
-      r.onloadend = () => setPostImgPreview(r.result as string);
+      r.onloadend = () => setCropPostImage(r.result as string);
       r.readAsDataURL(file);
-      setPostVideoFile(null);
-      setPostVideoPreview(null);
+      if (postFileRef.current) postFileRef.current.value = '';
     }
+  };
+
+  // ✅ NEW: Handler setelah crop 4:5 selesai
+  const handleCroppedPostImg = (blob: Blob) => {
+    setCropPostImage(null);
+    const file = new File([blob], `post_${Date.now()}.jpg`, { type: 'image/jpeg' });
+    setPostImgFile(file);
+    setPostImgPreview(URL.createObjectURL(blob));
+    setPostVideoFile(null);
+    setPostVideoPreview(null);
   };
 
   const handlePostVideo = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -569,7 +581,7 @@ export function ProfilePage({
         </>
       )}
 
-      {/* Followers Popup - Glassmorphism */}
+      {/* Followers Popup */}
       {showFollowersPopup && (
         <div
           className="fixed inset-0 z-[999] flex items-center justify-center p-4 animate-in fade-in duration-200"
@@ -588,7 +600,6 @@ export function ProfilePage({
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header */}
             <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
               <div className="flex items-center gap-2.5">
                 <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-md">
@@ -599,14 +610,10 @@ export function ProfilePage({
                   <p className="text-[11px] text-gray-400">{followerCount} orang</p>
                 </div>
               </div>
-              <button
-                onClick={() => setShowFollowersPopup(false)}
-                className="h-8 w-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-black/5 transition-all duration-200"
-              >
+              <button onClick={() => setShowFollowersPopup(false)} className="h-8 w-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-black/5 transition-all duration-200">
                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-            {/* Content */}
             <div className="flex-1 overflow-y-auto p-2.5" style={{ scrollbarWidth: 'thin' }}>
               {followersList.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12">
@@ -626,7 +633,7 @@ export function ProfilePage({
         </div>
       )}
 
-      {/* Following Popup - Glassmorphism */}
+      {/* Following Popup */}
       {showFollowingPopup && (
         <div
           className="fixed inset-0 z-[999] flex items-center justify-center p-4 animate-in fade-in duration-200"
@@ -645,7 +652,6 @@ export function ProfilePage({
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header */}
             <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
               <div className="flex items-center gap-2.5">
                 <div className="h-8 w-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center shadow-md">
@@ -656,14 +662,10 @@ export function ProfilePage({
                   <p className="text-[11px] text-gray-400">{followingCount} orang</p>
                 </div>
               </div>
-              <button
-                onClick={() => setShowFollowingPopup(false)}
-                className="h-8 w-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-black/5 transition-all duration-200"
-              >
+              <button onClick={() => setShowFollowingPopup(false)} className="h-8 w-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-black/5 transition-all duration-200">
                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-            {/* Content */}
             <div className="flex-1 overflow-y-auto p-2.5" style={{ scrollbarWidth: 'thin' }}>
               {followingList.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12">
@@ -683,7 +685,7 @@ export function ProfilePage({
         </div>
       )}
 
-      {/* Create Post Modal - Glassmorphism */}
+      {/* Create Post Modal */}
       {showCreatePost && (
         <div
           className="fixed inset-0 z-[999] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
@@ -702,11 +704,9 @@ export function ProfilePage({
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Drag handle for mobile */}
             <div className="flex justify-center pt-3 pb-0 sm:hidden">
               <div className="h-1 w-10 rounded-full bg-gray-300/60" />
             </div>
-            {/* Header */}
             <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
               <div className="flex items-center gap-2.5">
                 <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-md">
@@ -721,7 +721,6 @@ export function ProfilePage({
                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-            {/* Content */}
             <div className="flex-1 overflow-y-auto p-5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="h-11 w-11 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm overflow-hidden flex-shrink-0 ring-2 ring-white/50 shadow-md">
@@ -740,9 +739,18 @@ export function ProfilePage({
                 className="w-full resize-none text-sm text-gray-800 placeholder-gray-400 focus:outline-none leading-relaxed mb-3 bg-transparent"
                 autoFocus
               />
+              {/* ✅ Preview foto yang sudah di-crop 4:5 */}
               {postImgPreview && (
                 <div className="relative mb-3 rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(0,0,0,0.08)' }}>
-                  <img src={postImgPreview} alt="" className="w-full max-h-60 object-cover" />
+                  <div style={{ aspectRatio: '4/5' }}>
+                    <img src={postImgPreview} alt="" className="w-full h-full object-cover" />
+                  </div>
+                  <div className="absolute top-2 left-2 flex items-center gap-1 rounded-lg bg-black/40 backdrop-blur-sm px-2 py-1">
+                    <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <span className="text-[10px] text-white font-medium">4:5</span>
+                  </div>
                   <button onClick={() => { setPostImgFile(null); setPostImgPreview(null); }} className="absolute top-2 right-2 h-8 w-8 rounded-full bg-black/40 backdrop-blur-sm text-white flex items-center justify-center hover:bg-black/60 transition text-lg">×</button>
                 </div>
               )}
@@ -753,14 +761,15 @@ export function ProfilePage({
                 </div>
               )}
             </div>
-            {/* Footer */}
             <div className="flex items-center justify-between px-5 py-3.5" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
               <div className="flex gap-1">
                 <input ref={postFileRef} type="file" accept="image/*" onChange={handlePostImg} className="hidden" />
                 <input ref={postVideoRef} type="file" accept="video/*" onChange={handlePostVideo} className="hidden" />
+                {/* ✅ Label (4:5) pada tombol foto */}
                 <button onClick={() => postFileRef.current?.click()} className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-white/60 hover:text-blue-500 transition-all duration-200">
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                   Foto
+                  <span className="text-[10px] text-gray-400 font-normal">(4:5)</span>
                 </button>
                 <button onClick={() => postVideoRef.current?.click()} className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-white/60 hover:text-purple-500 transition-all duration-200">
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
@@ -784,8 +793,25 @@ export function ProfilePage({
         </div>
       )}
 
-      {/* Image Cropper */}
-      {cropImage && <ImageCropper imageSrc={cropImage} onCrop={handleCroppedAvatar} onCancel={() => setCropImage(null)} />}
+      {/* ✅ Avatar Cropper (1:1) */}
+      {cropImage && (
+        <ImageCropper
+          imageSrc={cropImage}
+          onCrop={handleCroppedAvatar}
+          onCancel={() => setCropImage(null)}
+          aspectRatio={1}
+        />
+      )}
+
+      {/* ✅ Post Photo Cropper (4:5) */}
+      {cropPostImage && (
+        <ImageCropper
+          imageSrc={cropPostImage}
+          onCrop={handleCroppedPostImg}
+          onCancel={() => setCropPostImage(null)}
+          aspectRatio={4 / 5}
+        />
+      )}
 
       {/* Lightbox */}
       {lightboxImg && <ImageLightbox src={lightboxImg} alt="Foto" onClose={() => setLightboxImg(null)} />}
