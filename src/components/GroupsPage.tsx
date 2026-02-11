@@ -7,7 +7,7 @@ type Props = {
 };
 
 export function GroupsPage({ currentUser }: Props) {
-  const [groups, setGroups] = useState<(Group & { member_count: number })[]>([]);
+  const [groups, setGroups] = useState<(Group & { member_count: number; unread_count: number })[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [members, setMembers] = useState<GroupMember[]>([]);
@@ -23,6 +23,7 @@ export function GroupsPage({ currentUser }: Props) {
   const [searchUser, setSearchUser] = useState('');
   const [searchGroup, setSearchGroup] = useState('');
   const [sending, setSending] = useState(false);
+  const [lastReadMap, setLastReadMap] = useState<Record<string, string>>({});
   const msgEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const prevMessageCountRef = useRef<number>(0);
@@ -37,6 +38,42 @@ export function GroupsPage({ currentUser }: Props) {
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     isNearBottomRef.current = distanceFromBottom <= threshold;
   }, []);
+
+  // Load last_read timestamps from localStorage
+  const loadLastReadMap = useCallback(() => {
+    try {
+      const stored = localStorage.getItem(`group_last_read_${currentUser.id}`);
+      if (stored) {
+        return JSON.parse(stored) as Record<string, string>;
+      }
+    } catch {
+      // ignore
+    }
+    return {};
+  }, [currentUser.id]);
+
+  // Save last_read timestamps to localStorage
+  const saveLastReadMap = useCallback((map: Record<string, string>) => {
+    try {
+      localStorage.setItem(`group_last_read_${currentUser.id}`, JSON.stringify(map));
+    } catch {
+      // ignore
+    }
+  }, [currentUser.id]);
+
+  // Mark a group as read
+  const markGroupAsRead = useCallback((groupId: string) => {
+    const now = new Date().toISOString();
+    setLastReadMap(prev => {
+      const updated = { ...prev, [groupId]: now };
+      saveLastReadMap(updated);
+      return updated;
+    });
+    // Also update the groups state to clear the badge immediately
+    setGroups(prev => prev.map(g =>
+      g.id === groupId ? { ...g, unread_count: 0 } : g
+    ));
+  }, [saveLastReadMap]);
 
   const fetchGroups = useCallback(async () => {
     const { data: memberOf } = await supabase
@@ -53,13 +90,39 @@ export function GroupsPage({ currentUser }: Props) {
         .order('created_at', { ascending: false });
 
       if (data) {
+        const currentLastReadMap = loadLastReadMap();
+        setLastReadMap(currentLastReadMap);
+
         const withCount = await Promise.all(
           data.map(async (g: Group) => {
-            const { count } = await supabase
+            const { count: memberCount } = await supabase
               .from('group_members')
               .select('*', { count: 'exact', head: true })
               .eq('group_id', g.id);
-            return { ...g, member_count: count || 0 };
+
+            // Count unread messages
+            const lastRead = currentLastReadMap[g.id];
+            let unreadCount = 0;
+
+            if (lastRead) {
+              const { count } = await supabase
+                .from('group_messages')
+                .select('*', { count: 'exact', head: true })
+                .eq('group_id', g.id)
+                .gt('created_at', lastRead)
+                .neq('user_id', currentUser.id);
+              unreadCount = count || 0;
+            } else {
+              // Never opened — count all messages from others
+              const { count } = await supabase
+                .from('group_messages')
+                .select('*', { count: 'exact', head: true })
+                .eq('group_id', g.id)
+                .neq('user_id', currentUser.id);
+              unreadCount = count || 0;
+            }
+
+            return { ...g, member_count: memberCount || 0, unread_count: unreadCount };
           })
         );
         setGroups(withCount);
@@ -70,7 +133,16 @@ export function GroupsPage({ currentUser }: Props) {
       setGroups([]);
     }
     setLoading(false);
-  }, [currentUser.id]);
+  }, [currentUser.id, loadLastReadMap]);
+
+  // Periodically refresh unread counts when on the group list
+  useEffect(() => {
+    if (selectedGroup) return; // Don't poll when inside a group chat
+    const interval = setInterval(() => {
+      fetchGroups();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [selectedGroup, fetchGroups]);
 
   const fetchMessages = useCallback(async () => {
     if (!selectedGroup) return;
@@ -93,25 +165,27 @@ export function GroupsPage({ currentUser }: Props) {
 
   useEffect(() => { fetchGroups(); }, [fetchGroups]);
 
-  // Reset scroll state when selecting a new group
+  // Reset scroll state when selecting a new group + mark as read
   useEffect(() => {
     if (selectedGroup) {
       isInitialLoadRef.current = true;
       prevMessageCountRef.current = 0;
       isNearBottomRef.current = true;
+      markGroupAsRead(selectedGroup.id);
       fetchMessages();
       fetchMembers();
     }
-  }, [selectedGroup, fetchMessages, fetchMembers]);
+  }, [selectedGroup, fetchMessages, fetchMembers, markGroupAsRead]);
 
-  // Polling for new messages
+  // Polling for new messages + keep marking as read while chat is open
   useEffect(() => {
     if (!selectedGroup) return;
     const interval = setInterval(() => {
       fetchMessages();
+      markGroupAsRead(selectedGroup.id);
     }, 3000);
     return () => clearInterval(interval);
-  }, [selectedGroup, fetchMessages]);
+  }, [selectedGroup, fetchMessages, markGroupAsRead]);
 
   // Smart auto-scroll
   useEffect(() => {
@@ -128,17 +202,13 @@ export function GroupsPage({ currentUser }: Props) {
     const isMyLastMessage = lastMessage?.user_id === currentUser.id;
 
     if (isInitialLoadRef.current && currentCount > 0) {
-      // Initial load — scroll immediately
       msgEndRef.current?.scrollIntoView({ behavior: 'auto' });
       isInitialLoadRef.current = false;
     } else if (hasNewMessages && isMyLastMessage) {
-      // User just sent a message — always scroll down
       msgEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     } else if (hasNewMessages && isNearBottomRef.current) {
-      // New message from others, user is near bottom
       msgEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-    // If user scrolled up — do NOT scroll
 
     prevMessageCountRef.current = currentCount;
   }, [messages, currentUser.id]);
@@ -162,6 +232,8 @@ export function GroupsPage({ currentUser }: Props) {
         user_id: currentUser.id,
         role: 'admin',
       });
+      // Mark the new group as read immediately
+      markGroupAsRead(data.id);
       setGroupName('');
       setGroupDesc('');
       setShowCreate(false);
@@ -185,6 +257,7 @@ export function GroupsPage({ currentUser }: Props) {
     setNewMsg('');
     setSending(false);
     await fetchMessages();
+    markGroupAsRead(selectedGroup.id);
   };
 
   const handleAddMember = async (userId: string) => {
@@ -256,6 +329,9 @@ export function GroupsPage({ currentUser }: Props) {
   const memberIds = members.map((m) => m.user_id);
   const isAdmin = selectedGroup?.creator_id === currentUser.id;
 
+  // Calculate total unread for potential parent component usage
+  const totalUnread = groups.reduce((sum, g) => sum + g.unread_count, 0);
+
   const gradients = [
     'from-emerald-400 to-teal-500',
     'from-blue-400 to-indigo-500',
@@ -278,7 +354,12 @@ export function GroupsPage({ currentUser }: Props) {
         {/* Header - Fixed top */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white z-10 shadow-sm flex-shrink-0">
           <button
-            onClick={() => { setSelectedGroup(null); setShowMembers(false); }}
+            onClick={() => {
+              markGroupAsRead(selectedGroup.id);
+              setSelectedGroup(null);
+              setShowMembers(false);
+              fetchGroups();
+            }}
             className="flex items-center justify-center h-8 w-8 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -538,7 +619,7 @@ export function GroupsPage({ currentUser }: Props) {
           <div ref={msgEndRef} />
         </div>
 
-        {/* Input area - Fixed bottom, above mobile sidebar */}
+        {/* Input area - Fixed bottom */}
         <div className="bg-white border-t border-gray-200 px-3 py-3 flex-shrink-0"
           style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}
         >
@@ -580,9 +661,16 @@ export function GroupsPage({ currentUser }: Props) {
       {/* Header */}
       <div className="bg-white px-4 pt-4 pb-3 border-b border-gray-100">
         <div className="flex items-center justify-between mb-3">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">Grup</h1>
-            <p className="text-xs text-gray-400 mt-0.5">Grup percakapan kamu</p>
+          <div className="flex items-center gap-2">
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">Grup</h1>
+              <p className="text-xs text-gray-400 mt-0.5">Grup percakapan kamu</p>
+            </div>
+            {totalUnread > 0 && (
+              <span className="flex items-center justify-center h-6 min-w-[24px] px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold shadow-sm animate-pulse">
+                {totalUnread > 99 ? '99+' : totalUnread}
+              </span>
+            )}
           </div>
           <button
             onClick={() => setShowCreate(true)}
@@ -726,6 +814,16 @@ export function GroupsPage({ currentUser }: Props) {
                   <div className={`absolute top-0 left-0 right-0 h-16 bg-gradient-to-br ${getGradient(idx)} opacity-10 rounded-t-2xl`} />
                   <div className={`absolute top-0 right-0 w-20 h-20 bg-gradient-to-bl ${getGradient(idx)} opacity-5 rounded-bl-full`} />
 
+                  {/* Unread badge */}
+                  {g.unread_count > 0 && (
+                    <div className="absolute top-2.5 right-2.5 z-10">
+                      <span className="relative flex items-center justify-center h-6 min-w-[24px] px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold shadow-lg ring-2 ring-white">
+                        {g.unread_count > 99 ? '99+' : g.unread_count}
+                        <span className="absolute inset-0 rounded-full bg-red-500 animate-ping opacity-30" />
+                      </span>
+                    </div>
+                  )}
+
                   <div className={`relative h-14 w-14 rounded-2xl bg-gradient-to-br ${getGradient(idx)} flex items-center justify-center text-white font-bold text-xl flex-shrink-0 shadow-lg mb-3 ring-4 ring-white`}>
                     {g.name.charAt(0).toUpperCase()}
                     <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full bg-emerald-400 border-[2.5px] border-white" />
@@ -751,11 +849,13 @@ export function GroupsPage({ currentUser }: Props) {
                   </div>
 
                   <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <div className={`h-6 w-6 rounded-full bg-gradient-to-br ${getGradient(idx)} flex items-center justify-center shadow-sm`}>
-                      <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                      </svg>
-                    </div>
+                    {g.unread_count === 0 && (
+                      <div className={`h-6 w-6 rounded-full bg-gradient-to-br ${getGradient(idx)} flex items-center justify-center shadow-sm`}>
+                        <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </div>
+                    )}
                   </div>
                 </button>
               ))}
