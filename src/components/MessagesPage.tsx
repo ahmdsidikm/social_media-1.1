@@ -39,23 +39,52 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
     isNearBottomRef.current = distanceFromBottom <= threshold;
   }, []);
 
+  // ============================================
+  // PERUBAHAN UTAMA: fetchContacts sekarang mengambil
+  // semua user yang pernah berkirim pesan + yang di-follow
+  // ============================================
   const fetchContacts = useCallback(async () => {
+    // 1. Ambil user yang di-follow (tetap ada)
     const { data: following } = await supabase
       .from('followers')
       .select('following_id')
       .eq('follower_id', currentUser.id);
 
-    if (!following || following.length === 0) {
+    const followingIds = following?.map((f: { following_id: string }) => f.following_id) || [];
+
+    // 2. Ambil semua user yang PERNAH MENGIRIM pesan ke kita
+    const { data: incomingMsgs } = await supabase
+      .from('messages')
+      .select('sender_id')
+      .eq('receiver_id', currentUser.id);
+
+    // 3. Ambil semua user yang PERNAH KITA KIRIMI pesan
+    const { data: outgoingMsgs } = await supabase
+      .from('messages')
+      .select('receiver_id')
+      .eq('sender_id', currentUser.id);
+
+    // 4. Gabungkan semua ID unik (tanpa duplikat, tanpa diri sendiri)
+    const allIds = new Set<string>();
+
+    followingIds.forEach((id: string) => allIds.add(id));
+    incomingMsgs?.forEach((m: { sender_id: string }) => allIds.add(m.sender_id));
+    outgoingMsgs?.forEach((m: { receiver_id: string }) => allIds.add(m.receiver_id));
+
+    // Hapus diri sendiri dari list
+    allIds.delete(currentUser.id);
+
+    if (allIds.size === 0) {
       setContacts([]);
       setLoading(false);
       return;
     }
 
-    const ids = following.map((f: { following_id: string }) => f.following_id);
+    // 5. Ambil data user dari semua ID yang terkumpul
     const { data: users } = await supabase
       .from('users')
       .select('*')
-      .in('id', ids);
+      .in('id', Array.from(allIds));
 
     if (users) {
       const contactsWithLast: ConvoUser[] = await Promise.all(
@@ -96,6 +125,8 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
         })
       );
 
+      // Urutkan: yang punya pesan terbaru di atas,
+      // yang belum pernah chat di bawah
       contactsWithLast.sort((a, b) => {
         if (!a.lastTime && !b.lastTime) return 0;
         if (!a.lastTime) return 1;
@@ -145,6 +176,9 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
 
   useEffect(() => {
     fetchContacts();
+    // Poll contacts juga supaya pesan baru dari orang asing muncul
+    const contactInterval = setInterval(fetchContacts, 5000);
+    return () => clearInterval(contactInterval);
   }, [fetchContacts]);
 
   useEffect(() => {
@@ -224,11 +258,10 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
     u.username.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Chat view - Full fixed layout
+  // Chat view
   if (selectedUser) {
     return (
       <div className="fixed inset-0 flex flex-col bg-white md:left-56 lg:left-64">
-        {/* Chat header - Fixed top */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white z-10 shadow-sm flex-shrink-0">
           <button
             onClick={() => { setSelectedUser(null); onClearTarget?.(); }}
@@ -251,7 +284,6 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
           </div>
         </div>
 
-        {/* Messages area - Scrollable middle */}
         <div
           ref={chatContainerRef}
           onScroll={handleScroll}
@@ -320,7 +352,6 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Image preview - Fixed above input */}
         {imgPreview && (
           <div className="bg-white px-4 py-3 border-t border-gray-100 flex-shrink-0">
             <div className="relative inline-block">
@@ -335,11 +366,9 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
           </div>
         )}
 
-        {/* Input area - Fixed bottom, above mobile sidebar */}
         <div className="bg-white border-t border-gray-200 px-3 py-3 flex-shrink-0 mb-[env(safe-area-inset-bottom,0px)] md:mb-0"
           style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}
         >
-          {/* Mobile: extra bottom padding for sidebar */}
           <div className="pb-14 md:pb-0">
             <div className="flex items-end gap-2">
               <input ref={fileRef} type="file" accept="image/*" onChange={handleImgSelect} className="hidden" />
@@ -386,7 +415,7 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white px-4 pt-4 pb-3 border-b border-gray-100">
         <h1 className="text-xl font-bold text-gray-900">Pesan</h1>
-        <p className="text-xs text-gray-400 mt-0.5">Kirim pesan ke orang yang kamu ikuti</p>
+        <p className="text-xs text-gray-400 mt-0.5">Semua percakapan kamu</p>
         <div className="mt-3 relative">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -413,8 +442,8 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
               <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
           </div>
-          <p className="text-base font-semibold text-gray-700">Belum ada kontak</p>
-          <p className="mt-1.5 text-sm text-gray-400 max-w-[240px]">Ikuti pengguna lain untuk bisa mulai mengirim pesan</p>
+          <p className="text-base font-semibold text-gray-700">Belum ada percakapan</p>
+          <p className="mt-1.5 text-sm text-gray-400 max-w-[240px]">Pesan dari siapapun akan muncul di sini</p>
         </div>
       ) : filteredContacts.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
