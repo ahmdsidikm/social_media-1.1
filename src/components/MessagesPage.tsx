@@ -27,9 +27,38 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
   const isNearBottomRef = useRef<boolean>(true);
   const isInitialLoadRef = useRef<boolean>(true);
 
+  // === STATE BARU UNTUK LONG PRESS & POPUP ===
+  const [longPressUser, setLongPressUser] = useState<ConvoUser | null>(null);
+  const [showDeletePopup, setShowDeletePopup] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggeredRef = useRef(false);
+
+  // State untuk menyimpan daftar percakapan yang dihapus (user_id + deleted_at)
+  // Format: { [other_user_id]: timestamp_string }
+  const [deletedConvos, setDeletedConvos] = useState<Record<string, string>>({});
+
   useEffect(() => {
     if (chatTarget) setSelectedUser(chatTarget);
   }, [chatTarget]);
+
+  // Load deleted conversations dari localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem(`deleted_convos_${currentUser.id}`);
+    if (stored) {
+      try {
+        setDeletedConvos(JSON.parse(stored));
+      } catch {
+        setDeletedConvos({});
+      }
+    }
+  }, [currentUser.id]);
+
+  // Save deleted conversations ke localStorage
+  const saveDeletedConvos = useCallback((convos: Record<string, string>) => {
+    setDeletedConvos(convos);
+    localStorage.setItem(`deleted_convos_${currentUser.id}`, JSON.stringify(convos));
+  }, [currentUser.id]);
 
   const handleScroll = useCallback(() => {
     const container = chatContainerRef.current;
@@ -39,12 +68,55 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
     isNearBottomRef.current = distanceFromBottom <= threshold;
   }, []);
 
-  // ============================================
-  // PERUBAHAN UTAMA: fetchContacts sekarang mengambil
-  // semua user yang pernah berkirim pesan + yang di-follow
-  // ============================================
+  // === LONG PRESS HANDLERS ===
+  const handleLongPressStart = useCallback((user: ConvoUser) => {
+    longPressTriggeredRef.current = false;
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTriggeredRef.current = true;
+      setLongPressUser(user);
+      setShowDeletePopup(true);
+      // Haptic feedback jika tersedia
+      if (navigator.vibrate) navigator.vibrate(50);
+    }, 600); // 600ms long press
+  }, []);
+
+  const handleLongPressEnd = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const handleLongPressMove = useCallback(() => {
+    // Cancel long press jika user move (scroll)
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const handleDeleteConversation = useCallback(async () => {
+    if (!longPressUser) return;
+    setDeleting(true);
+
+    try {
+      // Simpan timestamp sekarang - semua pesan sebelum ini dianggap "dihapus" untuk user ini
+      const newDeletedConvos = {
+        ...deletedConvos,
+        [longPressUser.id]: new Date().toISOString(),
+      };
+      saveDeletedConvos(newDeletedConvos);
+
+      // Hapus dari daftar kontak secara visual
+      setContacts(prev => prev.filter(c => c.id !== longPressUser.id));
+    } finally {
+      setDeleting(false);
+      setShowDeletePopup(false);
+      setLongPressUser(null);
+    }
+  }, [longPressUser, deletedConvos, saveDeletedConvos]);
+
   const fetchContacts = useCallback(async () => {
-    // 1. Ambil user yang di-follow (tetap ada)
     const { data: following } = await supabase
       .from('followers')
       .select('following_id')
@@ -52,26 +124,20 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
 
     const followingIds = following?.map((f: { following_id: string }) => f.following_id) || [];
 
-    // 2. Ambil semua user yang PERNAH MENGIRIM pesan ke kita
     const { data: incomingMsgs } = await supabase
       .from('messages')
       .select('sender_id')
       .eq('receiver_id', currentUser.id);
 
-    // 3. Ambil semua user yang PERNAH KITA KIRIMI pesan
     const { data: outgoingMsgs } = await supabase
       .from('messages')
       .select('receiver_id')
       .eq('sender_id', currentUser.id);
 
-    // 4. Gabungkan semua ID unik (tanpa duplikat, tanpa diri sendiri)
     const allIds = new Set<string>();
-
     followingIds.forEach((id: string) => allIds.add(id));
     incomingMsgs?.forEach((m: { sender_id: string }) => allIds.add(m.sender_id));
     outgoingMsgs?.forEach((m: { receiver_id: string }) => allIds.add(m.receiver_id));
-
-    // Hapus diri sendiri dari list
     allIds.delete(currentUser.id);
 
     if (allIds.size === 0) {
@@ -80,16 +146,23 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
       return;
     }
 
-    // 5. Ambil data user dari semua ID yang terkumpul
     const { data: users } = await supabase
       .from('users')
       .select('*')
       .in('id', Array.from(allIds));
 
     if (users) {
+      // Ambil deleted convos terbaru dari state
+      const currentDeletedConvos = JSON.parse(
+        localStorage.getItem(`deleted_convos_${currentUser.id}`) || '{}'
+      );
+
       const contactsWithLast: ConvoUser[] = await Promise.all(
         users.map(async (u: User) => {
-          const { data: sentMsgs } = await supabase
+          const deletedAt = currentDeletedConvos[u.id];
+
+          // Query sent messages (filter by deleted_at jika ada)
+          let sentQuery = supabase
             .from('messages')
             .select('*')
             .eq('sender_id', currentUser.id)
@@ -97,7 +170,14 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
             .order('created_at', { ascending: false })
             .limit(1);
 
-          const { data: recvMsgs } = await supabase
+          if (deletedAt) {
+            sentQuery = sentQuery.gt('created_at', deletedAt);
+          }
+
+          const { data: sentMsgs } = await sentQuery;
+
+          // Query received messages (filter by deleted_at jika ada)
+          let recvQuery = supabase
             .from('messages')
             .select('*')
             .eq('sender_id', u.id)
@@ -105,16 +185,29 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
             .order('created_at', { ascending: false })
             .limit(1);
 
+          if (deletedAt) {
+            recvQuery = recvQuery.gt('created_at', deletedAt);
+          }
+
+          const { data: recvMsgs } = await recvQuery;
+
           const allLast = [...(sentMsgs || []), ...(recvMsgs || [])];
           allLast.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
           const lastMsg = allLast[0] || null;
 
-          const { count: unread } = await supabase
+          // Hitung unread (hanya pesan setelah deleted_at)
+          let unreadQuery = supabase
             .from('messages')
             .select('*', { count: 'exact', head: true })
             .eq('sender_id', u.id)
             .eq('receiver_id', currentUser.id)
             .eq('is_read', false);
+
+          if (deletedAt) {
+            unreadQuery = unreadQuery.gt('created_at', deletedAt);
+          }
+
+          const { count: unread } = await unreadQuery;
 
           return {
             ...u,
@@ -125,16 +218,28 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
         })
       );
 
-      // Urutkan: yang punya pesan terbaru di atas,
-      // yang belum pernah chat di bawah
-      contactsWithLast.sort((a, b) => {
+      // Filter: jangan tampilkan kontak yang dihapus DAN tidak punya pesan baru setelah dihapus
+      const filteredContacts = contactsWithLast.filter(c => {
+        const deletedAt = currentDeletedConvos[c.id];
+        if (!deletedAt) return true; // Tidak pernah dihapus, tampilkan
+
+        // Jika dihapus tapi ada pesan baru setelahnya, tampilkan
+        if (c.lastTime && new Date(c.lastTime) > new Date(deletedAt)) return true;
+
+        // Jika di-follow dan belum pernah chat, tampilkan
+        if (!c.lastTime && followingIds.includes(c.id)) return true;
+
+        return false; // Sembunyikan
+      });
+
+      filteredContacts.sort((a, b) => {
         if (!a.lastTime && !b.lastTime) return 0;
         if (!a.lastTime) return 1;
         if (!b.lastTime) return -1;
         return new Date(b.lastTime).getTime() - new Date(a.lastTime).getTime();
       });
 
-      setContacts(contactsWithLast);
+      setContacts(filteredContacts);
     }
     setLoading(false);
   }, [currentUser.id]);
@@ -142,17 +247,28 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
   const fetchMessages = useCallback(async () => {
     if (!selectedUser) return;
 
-    const { data: sent } = await supabase
+    const deletedAt = deletedConvos[selectedUser.id];
+
+    let sentQuery = supabase
       .from('messages')
       .select('*')
       .eq('sender_id', currentUser.id)
       .eq('receiver_id', selectedUser.id);
 
-    const { data: received } = await supabase
+    let recvQuery = supabase
       .from('messages')
       .select('*')
       .eq('sender_id', selectedUser.id)
       .eq('receiver_id', currentUser.id);
+
+    // Filter pesan setelah deleted_at
+    if (deletedAt) {
+      sentQuery = sentQuery.gt('created_at', deletedAt);
+      recvQuery = recvQuery.gt('created_at', deletedAt);
+    }
+
+    const { data: sent } = await sentQuery;
+    const { data: received } = await recvQuery;
 
     const all = [...(sent || []), ...(received || [])];
     all.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
@@ -164,7 +280,7 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
       .eq('sender_id', selectedUser.id)
       .eq('receiver_id', currentUser.id)
       .eq('is_read', false);
-  }, [selectedUser, currentUser.id]);
+  }, [selectedUser, currentUser.id, deletedConvos]);
 
   useEffect(() => {
     if (selectedUser) {
@@ -176,7 +292,6 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
 
   useEffect(() => {
     fetchContacts();
-    // Poll contacts juga supaya pesan baru dari orang asing muncul
     const contactInterval = setInterval(fetchContacts, 5000);
     return () => clearInterval(contactInterval);
   }, [fetchContacts]);
@@ -413,6 +528,83 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
   // Contacts list
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* === DELETE POPUP WITH BLUR === */}
+      {showDeletePopup && longPressUser && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-6"
+          style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}
+          onClick={() => { setShowDeletePopup(false); setLongPressUser(null); }}
+        >
+          <div
+            className="absolute inset-0 bg-black/40 transition-opacity"
+            style={{ animation: 'fadeIn 0.2s ease-out' }}
+          />
+          <div
+            className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+            style={{ animation: 'popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header dengan info user */}
+            <div className="px-5 pt-5 pb-4 text-center">
+              <div className="mx-auto h-14 w-14 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-lg overflow-hidden ring-4 ring-white shadow-lg mb-3">
+                {longPressUser.avatar_url ? (
+                  <img src={longPressUser.avatar_url} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  longPressUser.display_name.charAt(0).toUpperCase()
+                )}
+              </div>
+              <h3 className="text-base font-bold text-gray-900">{longPressUser.display_name}</h3>
+              <p className="text-xs text-gray-400 mt-0.5">@{longPressUser.username}</p>
+            </div>
+
+            {/* Divider */}
+            <div className="h-px bg-gray-100" />
+
+            {/* Opsi Hapus */}
+            <button
+              onClick={handleDeleteConversation}
+              disabled={deleting}
+              className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-red-50 active:bg-red-100 transition-colors text-left group"
+            >
+              <div className="h-9 w-9 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 group-hover:bg-red-200 transition-colors">
+                <svg className="h-4.5 w-4.5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-red-600">Hapus percakapan</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">Pesan dihapus hanya dari akunmu</p>
+              </div>
+              {deleting && (
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-red-500 border-t-transparent flex-shrink-0" />
+              )}
+            </button>
+
+            {/* Divider */}
+            <div className="h-px bg-gray-100" />
+
+            {/* Tombol Batal */}
+            <button
+              onClick={() => { setShowDeletePopup(false); setLongPressUser(null); }}
+              className="w-full px-5 py-3.5 text-center hover:bg-gray-50 active:bg-gray-100 transition-colors"
+            >
+              <span className="text-sm font-medium text-gray-500">Batal</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes popIn {
+          from { opacity: 0; transform: scale(0.9) translateY(10px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+      `}</style>
+
       <div className="bg-white px-4 pt-4 pb-3 border-b border-gray-100">
         <h1 className="text-xl font-bold text-gray-900">Pesan</h1>
         <p className="text-xs text-gray-400 mt-0.5">Semua percakapan kamu</p>
@@ -454,8 +646,22 @@ export function MessagesPage({ currentUser, chatTarget, onClearTarget }: Props) 
           {filteredContacts.map((user) => (
             <button
               key={user.id}
-              onClick={() => setSelectedUser(user)}
-              className="flex w-full items-center gap-3 bg-white px-4 py-3.5 hover:bg-blue-50/40 active:bg-blue-50 transition-colors text-left group"
+              onClick={() => {
+                // Jangan buka chat jika long press baru saja terjadi
+                if (longPressTriggeredRef.current) {
+                  longPressTriggeredRef.current = false;
+                  return;
+                }
+                setSelectedUser(user);
+              }}
+              onMouseDown={() => handleLongPressStart(user)}
+              onMouseUp={handleLongPressEnd}
+              onMouseLeave={handleLongPressEnd}
+              onTouchStart={() => handleLongPressStart(user)}
+              onTouchEnd={handleLongPressEnd}
+              onTouchMove={handleLongPressMove}
+              onContextMenu={(e) => e.preventDefault()}
+              className="flex w-full items-center gap-3 bg-white px-4 py-3.5 hover:bg-blue-50/40 active:bg-blue-50 transition-colors text-left group select-none"
             >
               <div className="relative flex-shrink-0">
                 <div className="h-12 w-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm overflow-hidden ring-2 ring-white shadow-sm">
