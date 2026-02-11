@@ -1,3 +1,4 @@
+// App.tsx
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './lib/supabase';
 import type { User, Post, Like } from './lib/supabase';
@@ -9,6 +10,84 @@ import { GroupsPage } from './components/GroupsPage';
 import { LoginPage } from './components/LoginPage';
 
 export type Page = 'home' | 'messages' | 'groups' | 'search' | 'profile';
+
+// Helper: Extract storage path from Supabase public URL
+const extractStoragePath = (url: string): { bucket: string; path: string } | null => {
+  try {
+    // Format URL Supabase Storage:
+    // https://<project>.supabase.co/storage/v1/object/public/<bucket>/<path>
+    const storagePattern = /\/storage\/v1\/object\/public\/([^/]+)\/(.+)/;
+    const match = url.match(storagePattern);
+    if (match) {
+      return {
+        bucket: match[1],
+        path: decodeURIComponent(match[2]),
+      };
+    }
+
+    // Format alternatif: /storage/v1/object/sign/<bucket>/<path>
+    const signedPattern = /\/storage\/v1\/object\/sign\/([^/]+)\/(.+)/;
+    const signedMatch = url.match(signedPattern);
+    if (signedMatch) {
+      return {
+        bucket: signedMatch[1],
+        path: decodeURIComponent(signedMatch[2].split('?')[0]),
+      };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+// Helper: Delete file from Supabase Storage
+const deleteFileFromStorage = async (fileUrl: string): Promise<boolean> => {
+  const storageInfo = extractStoragePath(fileUrl);
+  if (!storageInfo) {
+    console.warn('Could not extract storage path from URL:', fileUrl);
+    return false;
+  }
+
+  const { error } = await supabase.storage
+    .from(storageInfo.bucket)
+    .remove([storageInfo.path]);
+
+  if (error) {
+    console.error('Failed to delete file from storage:', error.message);
+    return false;
+  }
+
+  console.log('Successfully deleted from storage:', storageInfo.path);
+  return true;
+};
+
+// Helper: Delete multiple files from storage
+const deleteFilesFromStorage = async (fileUrls: string[]): Promise<void> => {
+  // Group files by bucket for batch deletion
+  const bucketFiles: Record<string, string[]> = {};
+
+  for (const url of fileUrls) {
+    if (!url) continue;
+    const storageInfo = extractStoragePath(url);
+    if (storageInfo) {
+      if (!bucketFiles[storageInfo.bucket]) {
+        bucketFiles[storageInfo.bucket] = [];
+      }
+      bucketFiles[storageInfo.bucket].push(storageInfo.path);
+    }
+  }
+
+  // Delete files from each bucket
+  for (const [bucket, paths] of Object.entries(bucketFiles)) {
+    const { error } = await supabase.storage.from(bucket).remove(paths);
+    if (error) {
+      console.error(`Failed to delete files from bucket "${bucket}":`, error.message);
+    } else {
+      console.log(`Deleted ${paths.length} file(s) from bucket "${bucket}"`);
+    }
+  }
+};
 
 export function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -87,7 +166,6 @@ export function App() {
     }
   }, []);
 
-  // Fetch unread message count
   const fetchUnreadMessages = useCallback(async () => {
     if (!currentUser) return;
     const { count } = await supabase
@@ -98,11 +176,9 @@ export function App() {
     setUnreadMessages(count || 0);
   }, [currentUser]);
 
-  // Fetch unread group message count
   const fetchUnreadGroups = useCallback(async () => {
     if (!currentUser) return;
 
-    // Get groups user is member of
     const { data: memberships } = await supabase
       .from('group_members')
       .select('group_id')
@@ -115,7 +191,6 @@ export function App() {
 
     const groupIds = memberships.map((m: { group_id: string }) => m.group_id);
 
-    // Hitung pesan grup dalam 24 jam terakhir yang bukan dari user sendiri
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
     const { count } = await supabase
@@ -137,7 +212,6 @@ export function App() {
     }
   }, [currentUser, fetchPosts, fetchFollowingIds, fetchUnreadMessages, fetchUnreadGroups]);
 
-  // Poll for new notifications every 10 seconds
   useEffect(() => {
     if (!currentUser) return;
 
@@ -149,7 +223,6 @@ export function App() {
     return () => clearInterval(interval);
   }, [currentUser, fetchUnreadMessages, fetchUnreadGroups]);
 
-  // Realtime subscription for messages & groups
   useEffect(() => {
     if (!currentUser) return;
 
@@ -202,7 +275,6 @@ export function App() {
     };
   }, [currentUser, fetchUnreadMessages, fetchUnreadGroups]);
 
-  // Clear badge when entering page
   useEffect(() => {
     if (currentPage === 'messages') {
       setUnreadMessages(0);
@@ -217,7 +289,6 @@ export function App() {
     if (mainContentRef.current) {
       mainContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
     }
-    // Also scroll any scrollable child containers
     const scrollableElements = document.querySelectorAll('[data-scroll-container]');
     scrollableElements.forEach((el) => {
       el.scrollTo({ top: 0, behavior: 'smooth' });
@@ -226,7 +297,6 @@ export function App() {
 
   const handleNavClick = (page: Page) => {
     if (currentPage === page) {
-      // Same page pressed — scroll to top and reset sub-views
       scrollToTop();
       if (page === 'profile') {
         setViewingUser(null);
@@ -235,7 +305,6 @@ export function App() {
         setChatTarget(null);
       }
     } else {
-      // Different page — navigate
       setCurrentPage(page);
       if (page === 'profile') setViewingUser(null);
       if (page !== 'messages') setChatTarget(null);
@@ -282,12 +351,80 @@ export function App() {
     await fetchPosts();
   };
 
+  // ✅ UPDATED: Hapus post beserta gambar dari Supabase Storage
   const handleDeletePost = async (postId: string) => {
+    // 1. Cari post yang akan dihapus untuk mendapatkan URL gambar
+    const post = posts.find((p) => p.id === postId);
+
+    if (post) {
+      // 2. Kumpulkan semua URL gambar yang perlu dihapus
+      const imageUrlsToDelete: string[] = [];
+
+      // Gambar post utama (bisa single string atau array)
+      if (post.image_url) {
+        if (Array.isArray(post.image_url)) {
+          imageUrlsToDelete.push(...post.image_url.filter(Boolean));
+        } else if (typeof post.image_url === 'string') {
+          imageUrlsToDelete.push(post.image_url);
+        }
+      }
+
+      // Jika post punya field images (array of images)
+      if ((post as any).images && Array.isArray((post as any).images)) {
+        imageUrlsToDelete.push(...(post as any).images.filter(Boolean));
+      }
+
+      // Jika post punya field media_url
+      if ((post as any).media_url) {
+        if (Array.isArray((post as any).media_url)) {
+          imageUrlsToDelete.push(...(post as any).media_url.filter(Boolean));
+        } else if (typeof (post as any).media_url === 'string') {
+          imageUrlsToDelete.push((post as any).media_url);
+        }
+      }
+
+      // 3. Hapus gambar dari Storage (jika ada)
+      if (imageUrlsToDelete.length > 0) {
+        console.log(`Deleting ${imageUrlsToDelete.length} image(s) from storage...`);
+        await deleteFilesFromStorage(imageUrlsToDelete);
+      }
+
+      // 4. Hapus juga gambar dari komentar yang terkait (jika komentar bisa punya gambar)
+      const commentsWithImages = (post.comments || []).filter(
+        (c: any) => c.image_url || c.media_url
+      );
+      if (commentsWithImages.length > 0) {
+        const commentImageUrls = commentsWithImages
+          .map((c: any) => c.image_url || c.media_url)
+          .filter(Boolean);
+        if (commentImageUrls.length > 0) {
+          await deleteFilesFromStorage(commentImageUrls);
+        }
+      }
+    }
+
+    // 5. Hapus post dari database (cascade akan menghapus likes & comments)
     await supabase.from('posts').delete().eq('id', postId);
     await fetchPosts();
   };
 
+  // ✅ UPDATED: Hapus komentar beserta gambar (jika ada) dari Storage
   const handleDeleteComment = async (commentId: string) => {
+    // Cari komentar untuk mendapatkan URL gambar (jika ada)
+    const { data: comment } = await supabase
+      .from('comments')
+      .select('*')
+      .eq('id', commentId)
+      .single();
+
+    if (comment) {
+      // Hapus gambar komentar dari storage jika ada
+      const commentImageUrl = comment.image_url || comment.media_url;
+      if (commentImageUrl) {
+        await deleteFileFromStorage(commentImageUrl);
+      }
+    }
+
     await supabase.from('comments').delete().eq('id', commentId);
     await fetchPosts();
   };
@@ -317,7 +454,6 @@ export function App() {
     return <LoginPage onLogin={handleLogin} />;
   }
 
-  // Badge component
   const NotificationBadge = ({ count }: { count: number }) => {
     if (count <= 0) return null;
     return (
@@ -421,7 +557,6 @@ export function App() {
 
         {/* Desktop Sidebar */}
         <div className="hidden md:flex md:flex-col md:h-full">
-          {/* Logo */}
           <div className="flex items-center gap-2.5 px-5 py-4 border-b border-gray-100">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-md flex-shrink-0">
               <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -431,7 +566,6 @@ export function App() {
             <span className="text-lg font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">SosmedKu</span>
           </div>
 
-          {/* Desktop Nav - Tanpa Profil */}
           <nav className="flex flex-col gap-0.5 p-2 px-3 mt-1 flex-1">
             {navItemsBase.map((item) => (
               <button
@@ -457,7 +591,6 @@ export function App() {
             ))}
           </nav>
 
-          {/* Profile Button Desktop */}
           <div className="border-t border-gray-100">
             <button
               onClick={() => handleNavClick('profile')}
