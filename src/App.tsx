@@ -14,8 +14,6 @@ export type Page = 'home' | 'messages' | 'groups' | 'search' | 'profile';
 // Helper: Extract storage path from Supabase public URL
 const extractStoragePath = (url: string): { bucket: string; path: string } | null => {
   try {
-    // Format URL Supabase Storage:
-    // https://<project>.supabase.co/storage/v1/object/public/<bucket>/<path>
     const storagePattern = /\/storage\/v1\/object\/public\/([^/]+)\/(.+)/;
     const match = url.match(storagePattern);
     if (match) {
@@ -25,7 +23,6 @@ const extractStoragePath = (url: string): { bucket: string; path: string } | nul
       };
     }
 
-    // Format alternatif: /storage/v1/object/sign/<bucket>/<path>
     const signedPattern = /\/storage\/v1\/object\/sign\/([^/]+)\/(.+)/;
     const signedMatch = url.match(signedPattern);
     if (signedMatch) {
@@ -64,7 +61,6 @@ const deleteFileFromStorage = async (fileUrl: string): Promise<boolean> => {
 
 // Helper: Delete multiple files from storage
 const deleteFilesFromStorage = async (fileUrls: string[]): Promise<void> => {
-  // Group files by bucket for batch deletion
   const bucketFiles: Record<string, string[]> = {};
 
   for (const url of fileUrls) {
@@ -78,7 +74,6 @@ const deleteFilesFromStorage = async (fileUrls: string[]): Promise<void> => {
     }
   }
 
-  // Delete files from each bucket
   for (const [bucket, paths] of Object.entries(bucketFiles)) {
     const { error } = await supabase.storage.from(bucket).remove(paths);
     if (error) {
@@ -87,6 +82,17 @@ const deleteFilesFromStorage = async (fileUrls: string[]): Promise<void> => {
       console.log(`Deleted ${paths.length} file(s) from bucket "${bucket}"`);
     }
   }
+};
+
+// ✅ Helper: Get/Set last time user opened groups page
+const getGroupsLastRead = (userId: string): string => {
+  const key = `sosmedku_groups_last_read_${userId}`;
+  return localStorage.getItem(key) || new Date(0).toISOString();
+};
+
+const setGroupsLastRead = (userId: string): void => {
+  const key = `sosmedku_groups_last_read_${userId}`;
+  localStorage.setItem(key, new Date().toISOString());
 };
 
 export function App() {
@@ -100,6 +106,8 @@ export function App() {
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [unreadGroups, setUnreadGroups] = useState(0);
   const mainContentRef = useRef<HTMLElement>(null);
+  // ✅ Ref untuk track apakah user sedang di halaman groups
+  const isOnGroupsPageRef = useRef(false);
 
   useEffect(() => {
     const savedUserId = localStorage.getItem('sosmedku_user_id');
@@ -176,8 +184,15 @@ export function App() {
     setUnreadMessages(count || 0);
   }, [currentUser]);
 
+  // ✅ FIXED: Fetch unread groups berdasarkan last_read timestamp
   const fetchUnreadGroups = useCallback(async () => {
     if (!currentUser) return;
+
+    // Jika user sedang di halaman groups, selalu 0 dan update last_read
+    if (isOnGroupsPageRef.current) {
+      setUnreadGroups(0);
+      return;
+    }
 
     const { data: memberships } = await supabase
       .from('group_members')
@@ -191,14 +206,15 @@ export function App() {
 
     const groupIds = memberships.map((m: { group_id: string }) => m.group_id);
 
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    // ✅ Gunakan last_read dari localStorage, bukan 24 jam
+    const lastRead = getGroupsLastRead(currentUser.id);
 
     const { count } = await supabase
       .from('group_messages')
       .select('*', { count: 'exact', head: true })
       .in('group_id', groupIds)
       .neq('user_id', currentUser.id)
-      .gt('created_at', oneDayAgo);
+      .gt('created_at', lastRead);
 
     setUnreadGroups(count || 0);
   }, [currentUser]);
@@ -217,7 +233,10 @@ export function App() {
 
     const interval = setInterval(() => {
       fetchUnreadMessages();
-      fetchUnreadGroups();
+      // ✅ Hanya fetch jika TIDAK di halaman groups
+      if (!isOnGroupsPageRef.current) {
+        fetchUnreadGroups();
+      }
     }, 10000);
 
     return () => clearInterval(interval);
@@ -263,7 +282,19 @@ export function App() {
           schema: 'public',
           table: 'group_messages',
         },
-        () => {
+        (payload) => {
+          // ✅ Abaikan pesan dari diri sendiri
+          if (payload.new && (payload.new as any).user_id === currentUser.id) {
+            return;
+          }
+
+          // ✅ Jika sedang di halaman groups, update last_read dan tetap 0
+          if (isOnGroupsPageRef.current) {
+            setGroupsLastRead(currentUser.id);
+            setUnreadGroups(0);
+            return;
+          }
+
           fetchUnreadGroups();
         }
       )
@@ -275,14 +306,30 @@ export function App() {
     };
   }, [currentUser, fetchUnreadMessages, fetchUnreadGroups]);
 
+  // ✅ FIXED: Handle masuk/keluar halaman groups
   useEffect(() => {
+    if (!currentUser) return;
+
     if (currentPage === 'messages') {
       setUnreadMessages(0);
     }
+
     if (currentPage === 'groups') {
+      // Masuk halaman groups
+      isOnGroupsPageRef.current = true;
+      // Simpan waktu sekarang sebagai last_read
+      setGroupsLastRead(currentUser.id);
+      // Langsung set 0
       setUnreadGroups(0);
+    } else {
+      // Keluar dari halaman groups
+      if (isOnGroupsPageRef.current) {
+        // Update last_read saat keluar juga
+        setGroupsLastRead(currentUser.id);
+      }
+      isOnGroupsPageRef.current = false;
     }
-  }, [currentPage]);
+  }, [currentPage, currentUser]);
 
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -304,6 +351,11 @@ export function App() {
       if (page === 'messages') {
         setChatTarget(null);
       }
+      // ✅ Klik grup lagi saat sudah di halaman grup = refresh last_read
+      if (page === 'groups' && currentUser) {
+        setGroupsLastRead(currentUser.id);
+        setUnreadGroups(0);
+      }
     } else {
       setCurrentPage(page);
       if (page === 'profile') setViewingUser(null);
@@ -321,6 +373,7 @@ export function App() {
     localStorage.removeItem('sosmedku_user_id');
     setCurrentPage('home');
     setViewingUser(null);
+    isOnGroupsPageRef.current = false;
   };
 
   const handleLike = async (postId: string) => {
@@ -351,16 +404,12 @@ export function App() {
     await fetchPosts();
   };
 
-  // ✅ UPDATED: Hapus post beserta gambar dari Supabase Storage
   const handleDeletePost = async (postId: string) => {
-    // 1. Cari post yang akan dihapus untuk mendapatkan URL gambar
     const post = posts.find((p) => p.id === postId);
 
     if (post) {
-      // 2. Kumpulkan semua URL gambar yang perlu dihapus
       const imageUrlsToDelete: string[] = [];
 
-      // Gambar post utama (bisa single string atau array)
       if (post.image_url) {
         if (Array.isArray(post.image_url)) {
           imageUrlsToDelete.push(...post.image_url.filter(Boolean));
@@ -369,12 +418,10 @@ export function App() {
         }
       }
 
-      // Jika post punya field images (array of images)
       if ((post as any).images && Array.isArray((post as any).images)) {
         imageUrlsToDelete.push(...(post as any).images.filter(Boolean));
       }
 
-      // Jika post punya field media_url
       if ((post as any).media_url) {
         if (Array.isArray((post as any).media_url)) {
           imageUrlsToDelete.push(...(post as any).media_url.filter(Boolean));
@@ -383,13 +430,11 @@ export function App() {
         }
       }
 
-      // 3. Hapus gambar dari Storage (jika ada)
       if (imageUrlsToDelete.length > 0) {
         console.log(`Deleting ${imageUrlsToDelete.length} image(s) from storage...`);
         await deleteFilesFromStorage(imageUrlsToDelete);
       }
 
-      // 4. Hapus juga gambar dari komentar yang terkait (jika komentar bisa punya gambar)
       const commentsWithImages = (post.comments || []).filter(
         (c: any) => c.image_url || c.media_url
       );
@@ -403,14 +448,11 @@ export function App() {
       }
     }
 
-    // 5. Hapus post dari database (cascade akan menghapus likes & comments)
     await supabase.from('posts').delete().eq('id', postId);
     await fetchPosts();
   };
 
-  // ✅ UPDATED: Hapus komentar beserta gambar (jika ada) dari Storage
   const handleDeleteComment = async (commentId: string) => {
-    // Cari komentar untuk mendapatkan URL gambar (jika ada)
     const { data: comment } = await supabase
       .from('comments')
       .select('*')
@@ -418,7 +460,6 @@ export function App() {
       .single();
 
     if (comment) {
-      // Hapus gambar komentar dari storage jika ada
       const commentImageUrl = comment.image_url || comment.media_url;
       if (commentImageUrl) {
         await deleteFileFromStorage(commentImageUrl);
