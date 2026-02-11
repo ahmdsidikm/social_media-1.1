@@ -106,7 +106,7 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
           <img
             src={post.image_url}
             alt="Post"
-            className="w-full max-h-[500px] object-cover cursor-pointer hover:brightness-[0.92] transition-all duration-200"
+            className="w-full max-h-[80vh] object-contain cursor-pointer hover:brightness-[0.92] transition-all duration-200"
             loading="lazy"
             onClick={() => setShowLightbox(true)}
           />
