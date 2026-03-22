@@ -1,3 +1,5 @@
+// lib/supabase.ts
+
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = 'https://sdpkszleuubddfovgkfy.supabase.co';
@@ -23,6 +25,7 @@ export type Post = {
   image_url: string;
   video_url: string;
   created_at: string;
+  updated_at?: string;
   users?: User;
   likes?: Like[];
   comments?: Comment[];
@@ -35,15 +38,6 @@ export type Like = {
   created_at: string;
 };
 
-export type Comment = {
-  id: string;
-  post_id: string;
-  user_id: string;
-  content: string;
-  created_at: string;
-  users?: User;
-};
-
 export type CommentLike = {
   id: string;
   comment_id: string;
@@ -52,17 +46,17 @@ export type CommentLike = {
   users?: User;
 };
 
+// ✅ Hanya SATU definisi Comment (digabung)
 export type Comment = {
   id: string;
   post_id: string;
   user_id: string;
   content: string;
-  parent_id: string | null;
+  parent_id?: string | null;
   created_at: string;
   updated_at?: string;
   users?: User;
   comment_likes?: CommentLike[];
-  replies?: Comment[];
 };
 
 export type Follower = {
