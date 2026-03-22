@@ -11,9 +11,10 @@ type Props = {
   onDeletePost: (postId: string) => void;
   onDeleteComment: (commentId: string) => void;
   onViewProfile?: (user: User) => void;
+  onEditPost?: (post: Post) => void; // ✅ NEW
 };
 
-export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, onDeleteComment, onViewProfile }: Props) {
+export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, onDeleteComment, onViewProfile, onEditPost }: Props) {
   const [commentText, setCommentText] = useState('');
   const [showComments, setShowComments] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -43,6 +44,9 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
 
   const isVideo = post.video_url && post.video_url.length > 0;
 
+  // ✅ NEW: Cek apakah post sudah pernah diedit
+  const isEdited = post.updated_at && post.updated_at !== post.created_at;
+
   return (
     <div className="bg-white border-b border-gray-100">
       {/* Header */}
@@ -59,7 +63,15 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
         </button>
         <button onClick={handleAuthorClick} className="flex-1 min-w-0 text-left hover:opacity-80 transition">
           <p className="text-sm font-semibold text-gray-900 truncate">{authorName}</p>
-          <p className="text-xs text-gray-400">@{authorUsername} · {timeAgo(post.created_at)}</p>
+          <p className="text-xs text-gray-400">
+            @{authorUsername} · {timeAgo(post.created_at)}
+            {/* ✅ NEW: Label "diedit" */}
+            {isEdited && (
+              <span className="ml-1 text-gray-300" title={`Diedit ${timeAgo(post.updated_at!)}`}>
+                · <span className="italic">diedit</span>
+              </span>
+            )}
+          </p>
         </button>
         {isOwner && (
           <div className="relative">
@@ -76,10 +88,32 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
             {showMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-                <div className="absolute right-0 top-8 z-20 w-36 rounded-xl bg-white shadow-xl border border-gray-100 py-1">
+                <div className="absolute right-0 top-8 z-20 w-44 rounded-xl bg-white shadow-xl border border-gray-100 py-1 overflow-hidden">
+                  {/* ✅ NEW: Tombol Edit */}
+                  {onEditPost && (
+                    <button
+                      onClick={() => { onEditPost(post); setShowMenu(false); }}
+                      className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-amber-50 hover:text-amber-600 flex items-center gap-2.5 transition-colors"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      Edit
+                    </button>
+                  )}
+                  {/* Divider jika ada tombol edit */}
+                  {onEditPost && (
+                    <div className="mx-3 my-0.5 border-t border-gray-100" />
+                  )}
+                  {/* Tombol Hapus */}
                   <button
-                    onClick={() => { onDeletePost(post.id); setShowMenu(false); }}
-                    className="w-full px-4 py-2.5 text-left text-sm text-red-500 hover:bg-red-50 flex items-center gap-2"
+                    onClick={() => {
+                      if (confirm('Hapus postingan ini?')) {
+                        onDeletePost(post.id);
+                      }
+                      setShowMenu(false);
+                    }}
+                    className="w-full px-4 py-2.5 text-left text-sm text-red-500 hover:bg-red-50 flex items-center gap-2.5 transition-colors"
                   >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
