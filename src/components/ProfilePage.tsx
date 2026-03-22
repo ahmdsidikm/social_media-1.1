@@ -49,11 +49,26 @@ export function ProfilePage({
   const [stories, setStories] = useState<Story[]>([]);
   const [coverUploading, setCoverUploading] = useState(false);
   const [selectedPhotoPost, setSelectedPhotoPost] = useState<Post | null>(null);
-  const [cropPostImage, setCropPostImage] = useState<string | null>(null); // ✅ NEW
+  const [cropPostImage, setCropPostImage] = useState<string | null>(null);
+
+  // ✅ NEW: Edit post states
+  const [editingPost, setEditingPost] = useState<Post | null>(null);
+  const [editPostContent, setEditPostContent] = useState('');
+  const [editPostImgFile, setEditPostImgFile] = useState<File | null>(null);
+  const [editPostImgPreview, setEditPostImgPreview] = useState<string | null>(null);
+  const [editPostVideoFile, setEditPostVideoFile] = useState<File | null>(null);
+  const [editPostVideoPreview, setEditPostVideoPreview] = useState<string | null>(null);
+  const [editPostSubmitting, setEditPostSubmitting] = useState(false);
+  const [cropEditPostImage, setCropEditPostImage] = useState<string | null>(null);
+  const [editKeepOriginalImage, setEditKeepOriginalImage] = useState(true);
+  const [editKeepOriginalVideo, setEditKeepOriginalVideo] = useState(true);
+
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const postFileRef = useRef<HTMLInputElement>(null);
   const postVideoRef = useRef<HTMLInputElement>(null);
+  const editPostFileRef = useRef<HTMLInputElement>(null);
+  const editPostVideoRef = useRef<HTMLInputElement>(null);
 
   const displayUser = viewingUser || currentUser;
   const myPosts = posts.filter((p) => p.user_id === displayUser.id);
@@ -244,7 +259,6 @@ export function ProfilePage({
     onRefreshPosts();
   };
 
-  // ✅ MODIFIED: Buka cropper 4:5 dulu, bukan langsung preview
   const handlePostImg = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -257,7 +271,6 @@ export function ProfilePage({
     }
   };
 
-  // ✅ NEW: Handler setelah crop 4:5 selesai
   const handleCroppedPostImg = (blob: Blob) => {
     setCropPostImage(null);
     const file = new File([blob], `post_${Date.now()}.jpg`, { type: 'image/jpeg' });
@@ -276,6 +289,117 @@ export function ProfilePage({
       setPostImgFile(null);
       setPostImgPreview(null);
     }
+  };
+
+  // ✅ NEW: Open edit modal
+  const handleOpenEditPost = (post: Post) => {
+    setEditingPost(post);
+    setEditPostContent(post.content || '');
+    setEditPostImgFile(null);
+    setEditPostImgPreview(post.image_url || null);
+    setEditPostVideoFile(null);
+    setEditPostVideoPreview(post.video_url || null);
+    setEditKeepOriginalImage(!!(post.image_url));
+    setEditKeepOriginalVideo(!!(post.video_url));
+  };
+
+  // ✅ NEW: Handle edit post image select (crop 4:5)
+  const handleEditPostImg = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) { alert('Hanya file gambar'); return; }
+      if (file.size > 10 * 1024 * 1024) { alert('Max 10MB'); return; }
+      const r = new FileReader();
+      r.onloadend = () => setCropEditPostImage(r.result as string);
+      r.readAsDataURL(file);
+      if (editPostFileRef.current) editPostFileRef.current.value = '';
+    }
+  };
+
+  // ✅ NEW: Handle cropped edit post image
+  const handleCroppedEditPostImg = (blob: Blob) => {
+    setCropEditPostImage(null);
+    const file = new File([blob], `edit_post_${Date.now()}.jpg`, { type: 'image/jpeg' });
+    setEditPostImgFile(file);
+    setEditPostImgPreview(URL.createObjectURL(blob));
+    setEditKeepOriginalImage(false);
+    setEditPostVideoFile(null);
+    setEditPostVideoPreview(null);
+    setEditKeepOriginalVideo(false);
+  };
+
+  // ✅ NEW: Handle edit post video
+  const handleEditPostVideo = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 50 * 1024 * 1024) { alert('Ukuran video max 50MB'); return; }
+      setEditPostVideoFile(file);
+      setEditPostVideoPreview(URL.createObjectURL(file));
+      setEditKeepOriginalVideo(false);
+      setEditPostImgFile(null);
+      setEditPostImgPreview(null);
+      setEditKeepOriginalImage(false);
+    }
+  };
+
+  // ✅ NEW: Submit edit post
+  const handleSubmitEditPost = async () => {
+    if (!editingPost) return;
+    if (!editPostContent.trim() && !editPostImgPreview && !editPostVideoPreview) return;
+    setEditPostSubmitting(true);
+
+    let imageUrl = editKeepOriginalImage ? (editingPost.image_url || '') : '';
+    let videoUrl = editKeepOriginalVideo ? (editingPost.video_url || '') : '';
+
+    // Upload new image if changed
+    if (editPostImgFile) {
+      const ext = editPostImgFile.name.split('.').pop();
+      const name = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('posts').upload(name, editPostImgFile);
+      if (!upErr) {
+        const { data: u } = supabase.storage.from('posts').getPublicUrl(name);
+        imageUrl = u.publicUrl;
+      }
+    }
+
+    // Upload new video if changed
+    if (editPostVideoFile) {
+      const ext = editPostVideoFile.name.split('.').pop();
+      const name = `vid_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('videos').upload(name, editPostVideoFile);
+      if (!upErr) {
+        const { data: u } = supabase.storage.from('videos').getPublicUrl(name);
+        videoUrl = u.publicUrl;
+      }
+    }
+
+    const { error } = await supabase
+      .from('posts')
+      .update({
+        content: editPostContent.trim(),
+        image_url: imageUrl,
+        video_url: videoUrl,
+      })
+      .eq('id', editingPost.id)
+      .eq('user_id', currentUser.id); // Safety: only own posts
+
+    if (error) {
+      alert('Gagal mengedit postingan: ' + error.message);
+    } else {
+      // If we were viewing this post in photo tab, update it
+      if (selectedPhotoPost?.id === editingPost.id) {
+        setSelectedPhotoPost(null);
+      }
+    }
+
+    setEditingPost(null);
+    setEditPostContent('');
+    setEditPostImgFile(null);
+    setEditPostImgPreview(null);
+    setEditPostVideoFile(null);
+    setEditPostVideoPreview(null);
+    setEditPostSubmitting(false);
+    onRefreshPosts();
   };
 
   const hasStory = stories.length > 0;
@@ -515,7 +639,17 @@ export function ProfilePage({
         ) : (
           <div className="space-y-0">
             {myPosts.map((post) => (
-              <PostCard key={post.id} post={post} currentUser={currentUser} onLike={onLike} onComment={onComment} onDeletePost={onDeletePost} onDeleteComment={onDeleteComment} onViewProfile={(u) => { if (u.id !== displayUser.id) onSetViewingUser(u); }} />
+              <PostCard
+                key={post.id}
+                post={post}
+                currentUser={currentUser}
+                onLike={onLike}
+                onComment={onComment}
+                onDeletePost={onDeletePost}
+                onDeleteComment={onDeleteComment}
+                onViewProfile={(u) => { if (u.id !== displayUser.id) onSetViewingUser(u); }}
+                onEditPost={isOwnProfile ? handleOpenEditPost : undefined}
+              />
             ))}
           </div>
         )
@@ -540,6 +674,7 @@ export function ProfilePage({
                 onDeletePost={(id) => { onDeletePost(id); setSelectedPhotoPost(null); }}
                 onDeleteComment={onDeleteComment}
                 onViewProfile={(u) => { if (u.id !== displayUser.id) onSetViewingUser(u); }}
+                onEditPost={isOwnProfile ? handleOpenEditPost : undefined}
               />
             </div>
           ) : photoPosts.length === 0 ? (
@@ -739,7 +874,6 @@ export function ProfilePage({
                 className="w-full resize-none text-sm text-gray-800 placeholder-gray-400 focus:outline-none leading-relaxed mb-3 bg-transparent"
                 autoFocus
               />
-              {/* ✅ Preview foto yang sudah di-crop 4:5 */}
               {postImgPreview && (
                 <div className="relative mb-3 rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(0,0,0,0.08)' }}>
                   <div style={{ aspectRatio: '4/5' }}>
@@ -765,7 +899,6 @@ export function ProfilePage({
               <div className="flex gap-1">
                 <input ref={postFileRef} type="file" accept="image/*" onChange={handlePostImg} className="hidden" />
                 <input ref={postVideoRef} type="file" accept="video/*" onChange={handlePostVideo} className="hidden" />
-                {/* ✅ Label (4:5) pada tombol foto */}
                 <button onClick={() => postFileRef.current?.click()} className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-white/60 hover:text-blue-500 transition-all duration-200">
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                   Foto
@@ -793,7 +926,131 @@ export function ProfilePage({
         </div>
       )}
 
-      {/* ✅ Avatar Cropper (1:1) */}
+      {/* ✅ NEW: Edit Post Modal */}
+      {editingPost && (
+        <div
+          className="fixed inset-0 z-[999] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
+          style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', backgroundColor: 'rgba(0,0,0,0.4)' }}
+          onClick={() => setEditingPost(null)}
+        >
+          <div
+            className="w-full max-w-lg overflow-hidden max-h-[85vh] flex flex-col animate-in slide-in-from-bottom-6 duration-300"
+            style={{
+              background: 'rgba(255,255,255,0.9)',
+              backdropFilter: 'blur(40px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+              borderRadius: '24px 24px 0 0',
+              border: '1px solid rgba(255,255,255,0.6)',
+              boxShadow: '0 -25px 60px -12px rgba(0,0,0,0.25)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-center pt-3 pb-0 sm:hidden">
+              <div className="h-1 w-10 rounded-full bg-gray-300/60" />
+            </div>
+            <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-md">
+                  <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                </div>
+                <h3 className="text-sm font-bold text-gray-800">Edit Postingan</h3>
+              </div>
+              <button
+                onClick={() => setEditingPost(null)}
+                className="h-8 w-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-black/5 transition-all duration-200"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="h-11 w-11 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm overflow-hidden flex-shrink-0 ring-2 ring-white/50 shadow-md">
+                  {currentUser.avatar_url ? <img src={currentUser.avatar_url} alt="" className="h-full w-full object-cover" /> : currentUser.display_name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">{currentUser.display_name}</p>
+                  <p className="text-xs text-gray-400">@{currentUser.username} · <span className="text-amber-500">Mengedit</span></p>
+                </div>
+              </div>
+              <textarea
+                value={editPostContent}
+                onChange={(e) => setEditPostContent(e.target.value)}
+                placeholder="Apa yang kamu pikirkan?"
+                rows={4}
+                className="w-full resize-none text-sm text-gray-800 placeholder-gray-400 focus:outline-none leading-relaxed mb-3 bg-transparent"
+                autoFocus
+              />
+              {/* Image preview */}
+              {editPostImgPreview && (
+                <div className="relative mb-3 rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(0,0,0,0.08)' }}>
+                  <div style={{ aspectRatio: '4/5' }}>
+                    <img src={editPostImgPreview} alt="" className="w-full h-full object-cover" />
+                  </div>
+                  <div className="absolute top-2 left-2 flex items-center gap-1 rounded-lg bg-black/40 backdrop-blur-sm px-2 py-1">
+                    <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <span className="text-[10px] text-white font-medium">
+                      {editKeepOriginalImage && !editPostImgFile ? 'Asli' : '4:5'}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setEditPostImgFile(null);
+                      setEditPostImgPreview(null);
+                      setEditKeepOriginalImage(false);
+                    }}
+                    className="absolute top-2 right-2 h-8 w-8 rounded-full bg-black/40 backdrop-blur-sm text-white flex items-center justify-center hover:bg-black/60 transition text-lg"
+                  >×</button>
+                </div>
+              )}
+              {/* Video preview */}
+              {editPostVideoPreview && (
+                <div className="relative mb-3 rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(0,0,0,0.08)' }}>
+                  <video src={editPostVideoPreview} controls className="w-full max-h-60" />
+                  <button
+                    onClick={() => {
+                      setEditPostVideoFile(null);
+                      setEditPostVideoPreview(null);
+                      setEditKeepOriginalVideo(false);
+                    }}
+                    className="absolute top-2 right-2 h-8 w-8 rounded-full bg-black/40 backdrop-blur-sm text-white flex items-center justify-center hover:bg-black/60 transition text-lg"
+                  >×</button>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-between px-5 py-3.5" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+              <div className="flex gap-1">
+                <input ref={editPostFileRef} type="file" accept="image/*" onChange={handleEditPostImg} className="hidden" />
+                <input ref={editPostVideoRef} type="file" accept="video/*" onChange={handleEditPostVideo} className="hidden" />
+                <button onClick={() => editPostFileRef.current?.click()} className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-white/60 hover:text-blue-500 transition-all duration-200">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                  Foto
+                  <span className="text-[10px] text-gray-400 font-normal">(4:5)</span>
+                </button>
+                <button onClick={() => editPostVideoRef.current?.click()} className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-white/60 hover:text-purple-500 transition-all duration-200">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                  Video
+                </button>
+              </div>
+              <button
+                onClick={handleSubmitEditPost}
+                disabled={editPostSubmitting || (!editPostContent.trim() && !editPostImgPreview && !editPostVideoPreview)}
+                className="rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all duration-200 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:shadow-lg"
+              >
+                {editPostSubmitting ? (
+                  <div className="flex items-center gap-2">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Menyimpan...
+                  </div>
+                ) : 'Simpan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Avatar Cropper (1:1) */}
       {cropImage && (
         <ImageCropper
           imageSrc={cropImage}
@@ -803,12 +1060,22 @@ export function ProfilePage({
         />
       )}
 
-      {/* ✅ Post Photo Cropper (4:5) */}
+      {/* Post Photo Cropper (4:5) */}
       {cropPostImage && (
         <ImageCropper
           imageSrc={cropPostImage}
           onCrop={handleCroppedPostImg}
           onCancel={() => setCropPostImage(null)}
+          aspectRatio={4 / 5}
+        />
+      )}
+
+      {/* ✅ NEW: Edit Post Photo Cropper (4:5) */}
+      {cropEditPostImage && (
+        <ImageCropper
+          imageSrc={cropEditPostImage}
+          onCrop={handleCroppedEditPostImg}
+          onCancel={() => setCropEditPostImage(null)}
           aspectRatio={4 / 5}
         />
       )}
