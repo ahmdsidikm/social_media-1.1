@@ -46,7 +46,7 @@ export function PostCard({
   const authorUsername = post.users?.username || 'unknown';
   const authorAvatar = post.users?.avatar_url;
   const isVideo = post.video_url && post.video_url.length > 0;
-  const isEdited = post.updated_at && post.updated_at !== post.created_at;
+  const isEdited = post.update_at && post.updated_at !== post.created_at;
 
   const MAX_VISIBLE_LIKERS = 5;
 
@@ -59,6 +59,16 @@ export function PostCard({
   const visibleComments = sortedComments.slice(0, visibleCommentsCount);
   const hasMoreComments = sortedComments.length > visibleCommentsCount;
   const hiddenCount = sortedComments.length - visibleCommentsCount;
+
+  // Helper: navigate to profile and scroll to top
+  const handleViewProfile = useCallback(
+    (user: User) => {
+      if (!onViewProfile) return;
+      window.scrollTo({ top: 0, behavior: 'instant' });
+      onViewProfile(user);
+    },
+    [onViewProfile]
+  );
 
   const fetchLikerUsers = useCallback(async () => {
     if (!post.likes || post.likes.length === 0 || likersFetched) return;
@@ -103,7 +113,7 @@ export function PostCard({
       <div className="flex items-center gap-3 px-4 pt-4 pb-2">
         <button
           onClick={() => {
-            if (onViewProfile && post.users) onViewProfile(post.users);
+            if (post.users) handleViewProfile(post.users);
           }}
           className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm overflow-hidden flex-shrink-0 hover:ring-2 hover:ring-blue-300 transition"
         >
@@ -115,7 +125,7 @@ export function PostCard({
         </button>
         <button
           onClick={() => {
-            if (onViewProfile && post.users) onViewProfile(post.users);
+            if (post.users) handleViewProfile(post.users);
           }}
           className="flex-1 min-w-0 text-left hover:opacity-80 transition"
         >
@@ -286,9 +296,7 @@ export function PostCard({
                   {visibleLikers.map((user) => (
                     <button
                       key={user.id}
-                      onClick={() => {
-                        if (onViewProfile) onViewProfile(user);
-                      }}
+                      onClick={() => handleViewProfile(user)}
                       className="relative h-7 w-7 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold overflow-hidden flex-shrink-0 ring-2 ring-white hover:ring-pink-200 hover:z-10 hover:scale-110 transition-all shadow-sm"
                       title={user.display_name}
                     >
@@ -302,17 +310,30 @@ export function PostCard({
                 </div>
                 <div className="ml-2.5 flex-1 min-w-0">
                   <p className="text-xs text-gray-500 truncate">
-                    <span className="font-semibold text-gray-700">
-                      {visibleLikers
-                        .slice(0, 2)
-                        .map((u) => (u.id === currentUser.id ? 'Kamu' : u.display_name))
-                        .join(', ')}
-                    </span>
+                    {visibleLikers.slice(0, 2).map((u, idx) => {
+                      const name = u.id === currentUser.id ? 'Kamu' : u.display_name;
+                      return (
+                        <span key={u.id}>
+                          {idx > 0 && ', '}
+                          <button
+                            onClick={() => handleViewProfile(u)}
+                            className="font-semibold text-gray-700 hover:text-blue-600 hover:underline transition-colors"
+                          >
+                            {name}
+                          </button>
+                        </span>
+                      );
+                    })}
                     {likerUsers.length > 2 && (
                       <span>
                         {' '}
                         dan{' '}
-                        <span className="font-semibold text-gray-700">{likerUsers.length - 2} lainnya</span>
+                        <button
+                          onClick={() => setShowAllLikers(!showAllLikers)}
+                          className="font-semibold text-gray-700 hover:text-blue-600 hover:underline transition-colors"
+                        >
+                          {likerUsers.length - 2} lainnya
+                        </button>
                       </span>
                     )}
                     {likerUsers.length <= 2 && <span className="text-gray-400"> menyukai ini</span>}
@@ -345,7 +366,7 @@ export function PostCard({
                   <button
                     key={user.id}
                     onClick={() => {
-                      if (onViewProfile) onViewProfile(user);
+                      handleViewProfile(user);
                       setShowAllLikers(false);
                     }}
                     className="flex w-full items-center gap-3 p-2.5 hover:bg-white rounded-xl transition text-left"
@@ -401,7 +422,7 @@ export function PostCard({
                     {/* Avatar */}
                     <button
                       onClick={() => {
-                        if (onViewProfile && comment.users) onViewProfile(comment.users);
+                        if (comment.users) handleViewProfile(comment.users);
                       }}
                       className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 overflow-hidden hover:ring-2 hover:ring-blue-200 transition shadow-sm"
                     >
@@ -417,7 +438,7 @@ export function PostCard({
                         <div className="flex items-center gap-1 mb-0.5 flex-wrap">
                           <button
                             onClick={() => {
-                              if (onViewProfile && comment.users) onViewProfile(comment.users);
+                              if (comment.users) handleViewProfile(comment.users);
                             }}
                             className="text-[12px] font-semibold text-gray-800 hover:text-blue-600 transition"
                           >
