@@ -44,6 +44,27 @@ export type Comment = {
   users?: User;
 };
 
+export type CommentLike = {
+  id: string;
+  comment_id: string;
+  user_id: string;
+  created_at: string;
+  users?: User;
+};
+
+export type Comment = {
+  id: string;
+  post_id: string;
+  user_id: string;
+  content: string;
+  parent_id: string | null;
+  created_at: string;
+  updated_at?: string;
+  users?: User;
+  comment_likes?: CommentLike[];
+  replies?: Comment[];
+};
+
 export type Follower = {
   id: string;
   follower_id: string;
