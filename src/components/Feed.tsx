@@ -19,7 +19,6 @@ export function Feed({ currentUser, posts: externalPosts, onRefresh, onViewProfi
 
   const posts = externalPosts || internalPosts;
 
-  // Fetch posts (hanya jika tidak ada externalPosts)
   const fetchPosts = useCallback(async () => {
     if (externalPosts) return;
 
@@ -42,8 +41,10 @@ export function Feed({ currentUser, posts: externalPosts, onRefresh, onViewProfi
       `)
       .order('created_at', { ascending: false });
 
-    if (!error && data) {
-      setInternalPosts(data);
+    if (error) {
+      console.error('Error fetching posts:', error);
+    } else {
+      setInternalPosts(data || []);
     }
     setLoading(false);
   }, [externalPosts]);
@@ -77,42 +78,53 @@ export function Feed({ currentUser, posts: externalPosts, onRefresh, onViewProfi
     const existing = post?.likes?.find(l => l.user_id === currentUser.id);
 
     if (existing) {
-      await supabase.from('likes').delete().eq('id', existing.id);
+      const { error } = await supabase.from('likes').delete().eq('id', existing.id);
+      if (error) console.error('Error unliking post:', error);
     } else {
-      await supabase.from('likes').insert({ user_id: currentUser.id, post_id: postId });
+      const { error } = await supabase.from('likes').insert({
+        user_id: currentUser.id,
+        post_id: postId,
+      });
+      if (error) console.error('Error liking post:', error);
     }
     refresh();
   };
 
   // ── Comment ──
   const handleComment = async (postId: string, content: string) => {
-    await supabase.from('comments').insert({
+    const { error } = await supabase.from('comments').insert({
       user_id: currentUser.id,
       post_id: postId,
       content,
     });
+    if (error) console.error('Error adding comment:', error);
     refresh();
   };
 
   // ── Delete Post ──
   const handleDeletePost = async (postId: string) => {
-    await supabase.from('posts').delete().eq('id', postId);
+    const { error } = await supabase.from('posts').delete().eq('id', postId);
+    if (error) console.error('Error deleting post:', error);
     refresh();
   };
 
   // ── Delete Comment ──
   const handleDeleteComment = async (commentId: string) => {
-    await supabase.from('comments').delete().eq('id', commentId);
+    const { error } = await supabase.from('comments').delete().eq('id', commentId);
+    if (error) console.error('Error deleting comment:', error);
     refresh();
   };
 
   // ── Edit Comment ──
   const handleEditComment = async (commentId: string, newContent: string) => {
-    await supabase
+    const { error } = await supabase
       .from('comments')
-      .update({ content: newContent, updated_at: new Date().toISOString() })
-      .eq('id', commentId)
-      .eq('user_id', currentUser.id);
+      .update({
+        content: newContent,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', commentId);
+    if (error) console.error('Error editing comment:', error);
     refresh();
   };
 
@@ -123,39 +135,62 @@ export function Feed({ currentUser, posts: externalPosts, onRefresh, onViewProfi
       .select('id')
       .eq('comment_id', commentId)
       .eq('user_id', currentUser.id)
-      .single();
+      .maybeSingle();
 
     if (existing) {
-      await supabase.from('comment_likes').delete().eq('id', existing.id);
+      const { error } = await supabase.from('comment_likes').delete().eq('id', existing.id);
+      if (error) console.error('Error unliking comment:', error);
     } else {
-      await supabase.from('comment_likes').insert({ user_id: currentUser.id, comment_id: commentId });
+      const { error } = await supabase.from('comment_likes').insert({
+        user_id: currentUser.id,
+        comment_id: commentId,
+      });
+      if (error) console.error('Error liking comment:', error);
     }
     refresh();
   };
 
   // ── Reply to Comment ──
   const handleReplyComment = async (commentId: string, content: string) => {
-    await supabase.from('comment_replies').insert({
-      comment_id: commentId,
-      user_id: currentUser.id,
-      content,
-    });
+    console.log('Replying to comment:', commentId, 'content:', content);
+
+    const { data, error } = await supabase
+      .from('comment_replies')
+      .insert({
+        comment_id: commentId,
+        user_id: currentUser.id,
+        content: content,
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('Error replying to comment:', error);
+      alert('Gagal mengirim balasan: ' + error.message);
+      return;
+    }
+
+    console.log('Reply sent successfully:', data);
     refresh();
   };
 
   // ── Delete Reply ──
   const handleDeleteReply = async (replyId: string) => {
-    await supabase.from('comment_replies').delete().eq('id', replyId);
+    const { error } = await supabase.from('comment_replies').delete().eq('id', replyId);
+    if (error) console.error('Error deleting reply:', error);
     refresh();
   };
 
   // ── Edit Reply ──
   const handleEditReply = async (replyId: string, newContent: string) => {
-    await supabase
+    const { error } = await supabase
       .from('comment_replies')
-      .update({ content: newContent, updated_at: new Date().toISOString() })
-      .eq('id', replyId)
-      .eq('user_id', currentUser.id);
+      .update({
+        content: newContent,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', replyId);
+    if (error) console.error('Error editing reply:', error);
     refresh();
   };
 
@@ -166,12 +201,17 @@ export function Feed({ currentUser, posts: externalPosts, onRefresh, onViewProfi
       .select('id')
       .eq('reply_id', replyId)
       .eq('user_id', currentUser.id)
-      .single();
+      .maybeSingle();
 
     if (existing) {
-      await supabase.from('reply_likes').delete().eq('id', existing.id);
+      const { error } = await supabase.from('reply_likes').delete().eq('id', existing.id);
+      if (error) console.error('Error unliking reply:', error);
     } else {
-      await supabase.from('reply_likes').insert({ user_id: currentUser.id, reply_id: replyId });
+      const { error } = await supabase.from('reply_likes').insert({
+        user_id: currentUser.id,
+        reply_id: replyId,
+      });
+      if (error) console.error('Error liking reply:', error);
     }
     refresh();
   };
