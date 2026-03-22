@@ -7,16 +7,22 @@ import { PostCard } from './PostCard';
 
 type FeedProps = {
   currentUser: User;
+  posts?: Post[];
+  onRefresh?: () => void;
   onViewProfile?: (user: User) => void;
   onEditPost?: (post: Post) => void;
 };
 
-export function Feed({ currentUser, onViewProfile, onEditPost }: FeedProps) {
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [loading, setLoading] = useState(true);
+export function Feed({ currentUser, posts: externalPosts, onRefresh, onViewProfile, onEditPost }: FeedProps) {
+  const [internalPosts, setInternalPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(!externalPosts);
 
-  // ── Fetch semua posts beserta relasi ──
+  const posts = externalPosts || internalPosts;
+
+  // Fetch posts (hanya jika tidak ada externalPosts)
   const fetchPosts = useCallback(async () => {
+    if (externalPosts) return;
+
     const { data, error } = await supabase
       .from('posts')
       .select(`
@@ -26,256 +32,150 @@ export function Feed({ currentUser, onViewProfile, onEditPost }: FeedProps) {
         comments (
           *,
           users (*),
-          comment_likes (*)
+          comment_likes (*),
+          comment_replies (
+            *,
+            users (*),
+            reply_likes (*)
+          )
         )
       `)
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching posts:', error);
-      return;
+    if (!error && data) {
+      setInternalPosts(data);
     }
-
-    setPosts(data || []);
     setLoading(false);
-  }, []);
+  }, [externalPosts]);
 
   useEffect(() => {
     fetchPosts();
 
-    // Realtime: auto-refresh saat ada perubahan
-    const channel = supabase
-      .channel('feed-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, fetchPosts)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'likes' }, fetchPosts)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, fetchPosts)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comment_likes' }, fetchPosts)
-      .subscribe();
+    if (!externalPosts) {
+      const channel = supabase
+        .channel('feed-realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, fetchPosts)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'likes' }, fetchPosts)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, fetchPosts)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'comment_likes' }, fetchPosts)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'comment_replies' }, fetchPosts)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reply_likes' }, fetchPosts)
+        .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [fetchPosts]);
-
-  // ── Like / Unlike Post ──
-  const handleLikePost = async (postId: string) => {
-    const post = posts.find(p => p.id === postId);
-    const existingLike = post?.likes?.find(l => l.user_id === currentUser.id);
-
-    if (existingLike) {
-      // Unlike
-      await supabase.from('likes').delete().eq('id', existingLike.id);
-
-      setPosts(prev =>
-        prev.map(p =>
-          p.id === postId
-            ? { ...p, likes: p.likes?.filter(l => l.id !== existingLike.id) }
-            : p
-        )
-      );
-    } else {
-      // Like
-      const { data } = await supabase
-        .from('likes')
-        .insert({ user_id: currentUser.id, post_id: postId })
-        .select('*')
-        .single();
-
-      if (data) {
-        setPosts(prev =>
-          prev.map(p =>
-            p.id === postId
-              ? { ...p, likes: [...(p.likes || []), data] }
-              : p
-          )
-        );
-      }
+      return () => { supabase.removeChannel(channel); };
     }
+  }, [fetchPosts, externalPosts]);
+
+  const refresh = () => {
+    if (onRefresh) onRefresh();
+    else fetchPosts();
   };
 
-  // ── Tambah Komentar (+ Reply dengan parentId) ──
-  const handleComment = async (postId: string, content: string, parentId?: string) => {
-    const insertData: Record<string, string> = {
+  // ── Like Post ──
+  const handleLikePost = async (postId: string) => {
+    const post = posts.find(p => p.id === postId);
+    const existing = post?.likes?.find(l => l.user_id === currentUser.id);
+
+    if (existing) {
+      await supabase.from('likes').delete().eq('id', existing.id);
+    } else {
+      await supabase.from('likes').insert({ user_id: currentUser.id, post_id: postId });
+    }
+    refresh();
+  };
+
+  // ── Comment ──
+  const handleComment = async (postId: string, content: string) => {
+    await supabase.from('comments').insert({
       user_id: currentUser.id,
       post_id: postId,
       content,
-    };
+    });
+    refresh();
+  };
 
-    if (parentId) {
-      insertData.parent_id = parentId;
-    }
+  // ── Delete Post ──
+  const handleDeletePost = async (postId: string) => {
+    await supabase.from('posts').delete().eq('id', postId);
+    refresh();
+  };
 
-    const { data, error } = await supabase
+  // ── Delete Comment ──
+  const handleDeleteComment = async (commentId: string) => {
+    await supabase.from('comments').delete().eq('id', commentId);
+    refresh();
+  };
+
+  // ── Edit Comment ──
+  const handleEditComment = async (commentId: string, newContent: string) => {
+    await supabase
       .from('comments')
-      .insert(insertData)
-      .select(`
-        *,
-        users (*),
-        comment_likes (*)
-      `)
+      .update({ content: newContent, updated_at: new Date().toISOString() })
+      .eq('id', commentId)
+      .eq('user_id', currentUser.id);
+    refresh();
+  };
+
+  // ── Like Comment ──
+  const handleLikeComment = async (commentId: string) => {
+    const { data: existing } = await supabase
+      .from('comment_likes')
+      .select('id')
+      .eq('comment_id', commentId)
+      .eq('user_id', currentUser.id)
       .single();
 
-    if (error) {
-      console.error('Error adding comment:', error);
-      return;
-    }
-
-    if (data) {
-      setPosts(prev =>
-        prev.map(p =>
-          p.id === postId
-            ? { ...p, comments: [...(p.comments || []), data] }
-            : p
-        )
-      );
-    }
-  };
-
-  // ── Hapus Post ──
-  const handleDeletePost = async (postId: string) => {
-    const { error } = await supabase.from('posts').delete().eq('id', postId);
-
-    if (error) {
-      console.error('Error deleting post:', error);
-      return;
-    }
-
-    setPosts(prev => prev.filter(p => p.id !== postId));
-  };
-
-  // ── Hapus Komentar (beserta balasan-balasannya) ──
-  const handleDeleteComment = async (commentId: string) => {
-    const { error } = await supabase.from('comments').delete().eq('id', commentId);
-
-    if (error) {
-      console.error('Error deleting comment:', error);
-      return;
-    }
-
-    // Hapus komentar + semua reply yang parent_id = commentId
-    setPosts(prev =>
-      prev.map(p => ({
-        ...p,
-        comments: p.comments?.filter(
-          c => c.id !== commentId && c.parent_id !== commentId
-        ),
-      }))
-    );
-  };
-
-  // ── Edit Komentar (hanya pemilik) ──
-  const handleEditComment = async (commentId: string, newContent: string) => {
-    const now = new Date().toISOString();
-
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        content: newContent,
-        updated_at: now,
-      })
-      .eq('id', commentId)
-      .eq('user_id', currentUser.id); // Keamanan: hanya pemilik
-
-    if (error) {
-      console.error('Error editing comment:', error);
-      return;
-    }
-
-    // Optimistic update
-    setPosts(prev =>
-      prev.map(p => ({
-        ...p,
-        comments: p.comments?.map(c =>
-          c.id === commentId
-            ? { ...c, content: newContent, updated_at: now }
-            : c
-        ),
-      }))
-    );
-  };
-
-  // ── Like / Unlike Komentar ──
-  const handleLikeComment = async (commentId: string) => {
-    // Cari apakah sudah di-like
-    let existingLike: { id: string } | undefined;
-    let targetPostId: string | undefined;
-
-    for (const post of posts) {
-      const comment = post.comments?.find(c => c.id === commentId);
-      if (comment) {
-        targetPostId = post.id;
-        existingLike = comment.comment_likes?.find(
-          cl => cl.user_id === currentUser.id
-        );
-        break;
-      }
-    }
-
-    if (!targetPostId) return;
-
-    if (existingLike) {
-      // Unlike komentar
-      const { error } = await supabase
-        .from('comment_likes')
-        .delete()
-        .eq('comment_id', commentId)
-        .eq('user_id', currentUser.id);
-
-      if (error) {
-        console.error('Error unliking comment:', error);
-        return;
-      }
-
-      setPosts(prev =>
-        prev.map(p => ({
-          ...p,
-          comments: p.comments?.map(c =>
-            c.id === commentId
-              ? {
-                  ...c,
-                  comment_likes: c.comment_likes?.filter(
-                    cl => cl.user_id !== currentUser.id
-                  ),
-                }
-              : c
-          ),
-        }))
-      );
+    if (existing) {
+      await supabase.from('comment_likes').delete().eq('id', existing.id);
     } else {
-      // Like komentar
-      const { data, error } = await supabase
-        .from('comment_likes')
-        .insert({
-          user_id: currentUser.id,
-          comment_id: commentId,
-        })
-        .select('*')
-        .single();
-
-      if (error) {
-        console.error('Error liking comment:', error);
-        return;
-      }
-
-      if (data) {
-        setPosts(prev =>
-          prev.map(p => ({
-            ...p,
-            comments: p.comments?.map(c =>
-              c.id === commentId
-                ? {
-                    ...c,
-                    comment_likes: [...(c.comment_likes || []), data],
-                  }
-                : c
-            ),
-          }))
-        );
-      }
+      await supabase.from('comment_likes').insert({ user_id: currentUser.id, comment_id: commentId });
     }
+    refresh();
   };
 
-  // ── Loading State ──
+  // ── Reply to Comment ──
+  const handleReplyComment = async (commentId: string, content: string) => {
+    await supabase.from('comment_replies').insert({
+      comment_id: commentId,
+      user_id: currentUser.id,
+      content,
+    });
+    refresh();
+  };
+
+  // ── Delete Reply ──
+  const handleDeleteReply = async (replyId: string) => {
+    await supabase.from('comment_replies').delete().eq('id', replyId);
+    refresh();
+  };
+
+  // ── Edit Reply ──
+  const handleEditReply = async (replyId: string, newContent: string) => {
+    await supabase
+      .from('comment_replies')
+      .update({ content: newContent, updated_at: new Date().toISOString() })
+      .eq('id', replyId)
+      .eq('user_id', currentUser.id);
+    refresh();
+  };
+
+  // ── Like Reply ──
+  const handleLikeReply = async (replyId: string) => {
+    const { data: existing } = await supabase
+      .from('reply_likes')
+      .select('id')
+      .eq('reply_id', replyId)
+      .eq('user_id', currentUser.id)
+      .single();
+
+    if (existing) {
+      await supabase.from('reply_likes').delete().eq('id', existing.id);
+    } else {
+      await supabase.from('reply_likes').insert({ user_id: currentUser.id, reply_id: replyId });
+    }
+    refresh();
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-3">
@@ -285,7 +185,6 @@ export function Feed({ currentUser, onViewProfile, onEditPost }: FeedProps) {
     );
   }
 
-  // ── Empty State ──
   if (posts.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 px-4">
@@ -300,7 +199,6 @@ export function Feed({ currentUser, onViewProfile, onEditPost }: FeedProps) {
     );
   }
 
-  // ── Render Posts ──
   return (
     <div className="divide-y divide-gray-100">
       {posts.map(post => (
@@ -314,6 +212,10 @@ export function Feed({ currentUser, onViewProfile, onEditPost }: FeedProps) {
           onDeleteComment={handleDeleteComment}
           onEditComment={handleEditComment}
           onLikeComment={handleLikeComment}
+          onReplyComment={handleReplyComment}
+          onDeleteReply={handleDeleteReply}
+          onEditReply={handleEditReply}
+          onLikeReply={handleLikeReply}
           onViewProfile={onViewProfile}
           onEditPost={onEditPost}
         />
