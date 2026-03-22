@@ -5,6 +5,9 @@ type Props = {
   onCrop: (blob: Blob) => void;
   onCancel: () => void;
   aspectRatio?: number;
+  maxOutputSize?: number; // max file size in bytes (default: 500KB)
+  maxOutputWidth?: number; // max output width in px (default: 1080)
+  quality?: number; // initial JPEG quality 0-1 (default: 0.85)
 };
 
 type DragMode =
@@ -19,7 +22,72 @@ type DragMode =
   | 'resize-r'
   | null;
 
-export function ImageCropper({ imageSrc, onCrop, onCancel, aspectRatio = 1 }: Props) {
+async function compressCanvasToBlob(
+  canvas: HTMLCanvasElement,
+  maxSizeBytes: number,
+  initialQuality: number
+): Promise<Blob> {
+  let quality = initialQuality;
+  const minQuality = 0.1;
+  const step = 0.05;
+
+  // First attempt
+  let blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob((b) => resolve(b), 'image/jpeg', quality)
+  );
+
+  if (!blob) throw new Error('Failed to create blob');
+
+  // Iteratively reduce quality until under maxSizeBytes
+  while (blob.size > maxSizeBytes && quality > minQuality) {
+    quality -= step;
+    if (quality < minQuality) quality = minQuality;
+
+    blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), 'image/jpeg', quality)
+    );
+
+    if (!blob) throw new Error('Failed to create blob');
+
+    // Safety: if we've hit minimum quality, also try scaling down
+    if (quality <= minQuality && blob.size > maxSizeBytes) {
+      const scale = Math.sqrt(maxSizeBytes / blob.size);
+      const newWidth = Math.round(canvas.width * scale);
+      const newHeight = Math.round(canvas.height * scale);
+
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = newWidth;
+      tempCanvas.height = newHeight;
+      const tempCtx = tempCanvas.getContext('2d');
+      if (tempCtx) {
+        tempCtx.drawImage(canvas, 0, 0, newWidth, newHeight);
+        blob = await new Promise<Blob | null>((resolve) =>
+          tempCanvas.toBlob((b) => resolve(b), 'image/jpeg', minQuality)
+        );
+        if (!blob) throw new Error('Failed to create blob');
+      }
+      break;
+    }
+  }
+
+  return blob;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+export function ImageCropper({
+  imageSrc,
+  onCrop,
+  onCancel,
+  aspectRatio = 1,
+  maxOutputSize = 500 * 1024, // 500KB default
+  maxOutputWidth = 1080,
+  quality: initialQuality = 0.85,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -29,6 +97,12 @@ export function ImageCropper({ imageSrc, onCrop, onCancel, aspectRatio = 1 }: Pr
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [cropStart, setCropStart] = useState({ x: 0, y: 0, w: 0, h: 0 });
   const [imgDims, setImgDims] = useState({ w: 0, h: 0, dispW: 0, dispH: 0, offsetX: 0, offsetY: 0 });
+  const [isCompressing, setIsCompressing] = useState(false);
+  const [compressionInfo, setCompressionInfo] = useState<{
+    originalSize: number;
+    compressedSize: number;
+    reduction: number;
+  } | null>(null);
 
   const isSquare = Math.abs(aspectRatio - 1) < 0.01;
   const ratioLabel = isSquare ? '1:1' : Math.abs(aspectRatio - 4 / 5) < 0.01 ? '4:5' : `${aspectRatio.toFixed(2)}`;
@@ -277,39 +351,72 @@ export function ImageCropper({ imageSrc, onCrop, onCancel, aspectRatio = 1 }: Pr
     setCursorStyle('default');
   };
 
-  const handleCrop = () => {
+  const handleCrop = async () => {
     if (!imgRef.current || !canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const scaleX = imgDims.w / imgDims.dispW;
-    const scaleY = imgDims.h / imgDims.dispH;
-    const srcX = (cropArea.x - imgDims.offsetX) * scaleX;
-    const srcY = (cropArea.y - imgDims.offsetY) * scaleY;
-    const srcW = cropArea.w * scaleX;
-    const srcH = cropArea.h * scaleY;
+    setIsCompressing(true);
+    setCompressionInfo(null);
 
-    const outputW = Math.min(1080, Math.round(srcW));
-    const outputH = Math.round(outputW / aspectRatio);
-    canvas.width = outputW;
-    canvas.height = outputH;
-    ctx.drawImage(imgRef.current, srcX, srcY, srcW, srcH, 0, 0, outputW, outputH);
+    try {
+      const scaleX = imgDims.w / imgDims.dispW;
+      const scaleY = imgDims.h / imgDims.dispH;
+      const srcX = (cropArea.x - imgDims.offsetX) * scaleX;
+      const srcY = (cropArea.y - imgDims.offsetY) * scaleY;
+      const srcW = cropArea.w * scaleX;
+      const srcH = cropArea.h * scaleY;
 
-    canvas.toBlob((blob) => {
-      if (blob) onCrop(blob);
-    }, 'image/jpeg', 0.92);
+      const outputW = Math.min(maxOutputWidth, Math.round(srcW));
+      const outputH = Math.round(outputW / aspectRatio);
+      canvas.width = outputW;
+      canvas.height = outputH;
+
+      // Enable image smoothing for better downscale quality
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(imgRef.current, srcX, srcY, srcW, srcH, 0, 0, outputW, outputH);
+
+      // Get uncompressed size estimate
+      const uncompressedBlob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.98)
+      );
+      const originalSize = uncompressedBlob?.size || 0;
+
+      // Compress with iterative quality reduction
+      const compressedBlob = await compressCanvasToBlob(canvas, maxOutputSize, initialQuality);
+
+      const reduction = originalSize > 0
+        ? Math.round((1 - compressedBlob.size / originalSize) * 100)
+        : 0;
+
+      setCompressionInfo({
+        originalSize,
+        compressedSize: compressedBlob.size,
+        reduction,
+      });
+
+      // Short delay to show compression info
+      await new Promise((resolve) => setTimeout(resolve, 600));
+
+      onCrop(compressedBlob);
+    } catch (err) {
+      console.error('Compression failed:', err);
+      // Fallback: just do a simple crop without compression
+      canvas.toBlob((blob) => {
+        if (blob) onCrop(blob);
+      }, 'image/jpeg', initialQuality);
+    } finally {
+      setIsCompressing(false);
+    }
   };
 
-  // Overlay rects: 4 dark rectangles around the crop area
+  // Overlay rects
   const overlayRects = imgLoaded ? [
-    // Top
     { left: 0, top: 0, width: '100%', height: cropArea.y },
-    // Bottom
     { left: 0, top: cropArea.y + cropArea.h, width: '100%', height: `calc(100% - ${cropArea.y + cropArea.h}px)` },
-    // Left
     { left: 0, top: cropArea.y, width: cropArea.x, height: cropArea.h },
-    // Right
     { left: cropArea.x + cropArea.w, top: cropArea.y, width: `calc(100% - ${cropArea.x + cropArea.w}px)`, height: cropArea.h },
   ] : [];
 
@@ -326,10 +433,12 @@ export function ImageCropper({ imageSrc, onCrop, onCancel, aspectRatio = 1 }: Pr
             </div>
             <div>
               <h3 className="text-sm font-bold text-gray-800">Potong Foto</h3>
-              <p className="text-[10px] text-gray-400">Rasio {ratioLabel} • Seret sudut untuk ubah ukuran</p>
+              <p className="text-[10px] text-gray-400">
+                Rasio {ratioLabel} • Maks {formatFileSize(maxOutputSize)} • Otomatis kompres
+              </p>
             </div>
           </div>
-          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 transition">
+          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 transition" disabled={isCompressing}>
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -340,15 +449,14 @@ export function ImageCropper({ imageSrc, onCrop, onCancel, aspectRatio = 1 }: Pr
         <div
           ref={containerRef}
           className="relative w-full bg-gray-900 select-none touch-none overflow-hidden"
-          style={{ height: '420px', cursor: cursorStyle }}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
+          style={{ height: '420px', cursor: isCompressing ? 'wait' : cursorStyle }}
+          onPointerDown={isCompressing ? undefined : handlePointerDown}
+          onPointerMove={isCompressing ? undefined : handlePointerMove}
+          onPointerUp={isCompressing ? undefined : handlePointerUp}
+          onPointerLeave={isCompressing ? undefined : handlePointerUp}
         >
           {imgLoaded && (
             <>
-              {/* Image — full brightness, no filter */}
               <img
                 src={imageSrc}
                 alt="Crop"
@@ -363,7 +471,6 @@ export function ImageCropper({ imageSrc, onCrop, onCancel, aspectRatio = 1 }: Pr
                 draggable={false}
               />
 
-              {/* 4 dark overlay rectangles around crop — no overlap on crop area */}
               {overlayRects.map((rect, i) => (
                 <div
                   key={i}
@@ -378,7 +485,6 @@ export function ImageCropper({ imageSrc, onCrop, onCancel, aspectRatio = 1 }: Pr
                 />
               ))}
 
-              {/* Crop border */}
               <div
                 className="absolute pointer-events-none"
                 style={{
@@ -390,7 +496,6 @@ export function ImageCropper({ imageSrc, onCrop, onCancel, aspectRatio = 1 }: Pr
                   borderRadius: isSquare ? '50%' : '4px',
                 }}
               >
-                {/* For circle crop: dark corners inside the bounding box but outside the circle */}
                 {isSquare && (
                   <div
                     className="absolute inset-0 pointer-events-none"
@@ -402,14 +507,12 @@ export function ImageCropper({ imageSrc, onCrop, onCancel, aspectRatio = 1 }: Pr
                 )}
               </div>
 
-              {/* Resize handles */}
               <div className="absolute pointer-events-none" style={{
                 left: cropArea.x,
                 top: cropArea.y,
                 width: cropArea.w,
                 height: cropArea.h,
               }}>
-                {/* Corner handles */}
                 {[
                   { cls: 'top-0 left-0', tx: 'translate(-50%, -50%)' },
                   { cls: 'top-0 right-0', tx: 'translate(50%, -50%)' },
@@ -421,7 +524,6 @@ export function ImageCropper({ imageSrc, onCrop, onCancel, aspectRatio = 1 }: Pr
                   </div>
                 ))}
 
-                {/* Edge handles */}
                 {[
                   { cls: 'top-0 left-1/2', tx: 'translate(-50%, -50%)' },
                   { cls: 'bottom-0 left-1/2', tx: 'translate(-50%, 50%)' },
@@ -434,7 +536,6 @@ export function ImageCropper({ imageSrc, onCrop, onCancel, aspectRatio = 1 }: Pr
                 ))}
               </div>
 
-              {/* Guides */}
               <div
                 className="absolute pointer-events-none"
                 style={{
@@ -476,23 +577,94 @@ export function ImageCropper({ imageSrc, onCrop, onCancel, aspectRatio = 1 }: Pr
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-white/30 border-t-white" />
             </div>
           )}
+
+          {/* Compression overlay */}
+          {isCompressing && (
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center z-50">
+              <div className="relative mb-4">
+                <div className="h-16 w-16 animate-spin rounded-full border-4 border-white/20 border-t-blue-400" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </div>
+              </div>
+              <p className="text-white font-semibold text-sm mb-1">Mengompres gambar...</p>
+              <p className="text-white/60 text-xs">Mengoptimalkan ukuran file</p>
+
+              {compressionInfo && (
+                <div className="mt-4 bg-white/10 backdrop-blur rounded-xl px-4 py-3 text-center">
+                  <div className="flex items-center gap-3 text-xs text-white/80">
+                    <div className="text-center">
+                      <p className="text-white/50 text-[10px] mb-0.5">Sebelum</p>
+                      <p className="font-semibold">{formatFileSize(compressionInfo.originalSize)}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <svg className="h-4 w-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                      </svg>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-white/50 text-[10px] mb-0.5">Sesudah</p>
+                      <p className="font-semibold text-green-400">{formatFileSize(compressionInfo.compressedSize)}</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex items-center justify-center gap-1">
+                    <svg className="h-3 w-3 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span className="text-[11px] text-green-400 font-medium">
+                      Hemat {compressionInfo.reduction}%
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <canvas ref={canvasRef} className="hidden" />
 
-        <div className="flex gap-2 px-4 py-3 border-t border-gray-100">
-          <button
-            onClick={onCancel}
-            className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
-          >
-            Batal
-          </button>
-          <button
-            onClick={handleCrop}
-            className="flex-1 rounded-xl bg-blue-500 py-2.5 text-sm font-semibold text-white hover:bg-blue-600 transition"
-          >
-            Terapkan
-          </button>
+        {/* Footer */}
+        <div className="border-t border-gray-100">
+          {/* Compression info badge */}
+          <div className="flex items-center justify-center gap-2 px-4 py-2 bg-gray-50">
+            <svg className="h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="text-[11px] text-gray-400">
+              Gambar akan dikompres otomatis (maks {formatFileSize(maxOutputSize)}, {maxOutputWidth}px)
+            </span>
+          </div>
+
+          <div className="flex gap-2 px-4 py-3">
+            <button
+              onClick={onCancel}
+              disabled={isCompressing}
+              className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 transition disabled:opacity-50"
+            >
+              Batal
+            </button>
+            <button
+              onClick={handleCrop}
+              disabled={isCompressing}
+              className="flex-1 rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 py-2.5 text-sm font-semibold text-white hover:from-blue-600 hover:to-purple-700 transition disabled:opacity-70 flex items-center justify-center gap-2"
+            >
+              {isCompressing ? (
+                <>
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                  <span>Mengompres...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span>Terapkan</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>
