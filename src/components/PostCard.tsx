@@ -818,7 +818,7 @@ export function PostCard({
                 title={`Diedit ${timeAgo(post.updated_at!)}`}
               >
                 ·{' '}
-                <span className="italic">diedit</span>
+                <span className="italic"></span>
               </span>
             )}
           </p>
