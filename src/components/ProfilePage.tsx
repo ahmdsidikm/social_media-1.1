@@ -75,7 +75,7 @@ export function ProfilePage({
   const isOwnProfile = !viewingUser || viewingUser.id === currentUser.id;
   const photoPosts = myPosts.filter((p) => p.image_url && p.image_url.length > 0);
 
-  const COVER_ASPECT_RATIO = 16 / 9;
+  const COVER_ASPECT_RATIO = 16 / 5;
 
   const fetchFollowData = useCallback(async () => {
     const { count: fCount } = await supabase
