@@ -14,7 +14,7 @@ type Props = {
   onDeleteComment: (commentId: string) => void;
   onEditComment: (commentId: string, newContent: string) => void;
   onLikeComment: (commentId: string) => void;
-  onReplyComment: (commentId: string, content: string) => void;
+  onReplyComment: (commentId: string, content: string) => Promise<void> | void;
   onDeleteReply: (replyId: string) => void;
   onEditReply: (replyId: string, newContent: string) => void;
   onLikeReply: (replyId: string) => void;
@@ -74,10 +74,8 @@ function ReplyItem({
 
   return (
     <div className="ml-10 mt-2.5 flex items-start gap-2 group/reply relative">
-      {/* Garis penghubung ke komentar induk */}
       <div className="absolute -left-[0.35rem] top-0 w-4 h-3 border-l-2 border-b-2 border-gray-200 rounded-bl-lg" />
 
-      {/* Avatar */}
       <button
         onClick={() => { if (onViewProfile && replyUser) onViewProfile(replyUser); }}
         className="h-6 w-6 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0 overflow-hidden hover:ring-2 hover:ring-emerald-200 transition shadow-sm"
@@ -126,7 +124,6 @@ function ReplyItem({
                 {isEdited && <span className="text-[7px] text-gray-300 italic">· diedit</span>}
               </div>
 
-              {/* Mention siapa yang dibalas */}
               {parentCommentUser && (
                 <p className="text-[9px] text-emerald-500 mb-0.5 flex items-center gap-1">
                   <span>↩</span>
@@ -136,7 +133,6 @@ function ReplyItem({
 
               <p className="text-[11px] text-gray-600 leading-relaxed break-words whitespace-pre-wrap">{reply.content}</p>
 
-              {/* Like badge */}
               {likeCount > 0 && (
                 <div className="absolute -bottom-2 right-2 flex items-center gap-0.5 bg-white rounded-full px-1.5 py-0.5 shadow border border-gray-100">
                   <svg className="h-2 w-2 text-red-500" fill="currentColor" viewBox="0 0 24 24">
@@ -146,7 +142,6 @@ function ReplyItem({
                 </div>
               )}
 
-              {/* Menu (owner only) */}
               {isOwner && (
                 <div className="absolute top-1 right-1">
                   <button
@@ -180,7 +175,6 @@ function ReplyItem({
               )}
             </div>
 
-            {/* Actions */}
             <div className="flex items-center gap-3 mt-0.5 px-1.5">
               <span className="text-[9px] text-gray-400">{timeAgo(reply.created_at)}</span>
               <button
@@ -218,7 +212,7 @@ function CommentItem({
   onDeleteComment: (commentId: string) => void;
   onEditComment: (commentId: string, newContent: string) => void;
   onLikeComment: (commentId: string) => void;
-  onReplyComment: (commentId: string, content: string) => void;
+  onReplyComment: (commentId: string, content: string) => Promise<void> | void;
   onDeleteReply: (replyId: string) => void;
   onEditReply: (replyId: string, newContent: string) => void;
   onLikeReply: (replyId: string) => void;
@@ -266,29 +260,49 @@ function CommentItem({
     setIsEditing(false);
   };
 
-  const handleSubmitReply = async () => {
+  // ══════════════════════════════════════════
+  // PERBAIKAN UTAMA: handleSubmitReply
+  // ══════════════════════════════════════════
+  const handleSubmitReply = useCallback(async () => {
     const trimmed = replyText.trim();
-    if (!trimmed || sending) return;
+    if (!trimmed || sending) {
+      console.log('[Reply] Blocked: empty or already sending', { trimmed, sending });
+      return;
+    }
 
-    console.log('Submitting reply:', trimmed, 'to comment:', comment.id);
+    console.log('[Reply] Sending reply:', {
+      commentId: comment.id,
+      content: trimmed,
+      userId: currentUser.id,
+    });
+
     setSending(true);
 
     try {
-      await onReplyComment(comment.id, trimmed);
+      // Panggil onReplyComment dan tunggu hasilnya (baik Promise maupun void)
+      const result = onReplyComment(comment.id, trimmed);
+
+      // Jika hasilnya Promise, tunggu selesai
+      if (result && typeof (result as Promise<void>).then === 'function') {
+        await result;
+      }
+
+      console.log('[Reply] Success! Clearing input...');
       setReplyText('');
       setIsReplying(false);
       setShowReplies(true);
     } catch (err) {
-      console.error('Reply failed:', err);
+      console.error('[Reply] Error sending reply:', err);
+      // Jangan clear input kalau gagal, biar user bisa coba lagi
+      alert('Gagal mengirim balasan. Coba lagi.');
     } finally {
       setSending(false);
     }
-  };
+  }, [replyText, sending, comment.id, currentUser.id, onReplyComment]);
 
   return (
     <div className="relative">
       <div className="flex items-start gap-2 group/comment">
-        {/* Avatar */}
         <button
           onClick={() => { if (onViewProfile && comment.users) onViewProfile(comment.users); }}
           className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 overflow-hidden hover:ring-2 hover:ring-blue-200 transition shadow-sm"
@@ -302,7 +316,6 @@ function CommentItem({
 
         <div className="flex-1 min-w-0">
           {isEditing ? (
-            /* ── Edit Mode ── */
             <div className="rounded-2xl bg-white px-3 py-2 shadow-sm border-2 border-blue-200">
               <div className="flex items-center gap-1.5 mb-1.5">
                 <span className="text-[12px] font-semibold text-gray-800">{commenterName}</span>
@@ -328,7 +341,6 @@ function CommentItem({
               </div>
             </div>
           ) : (
-            /* ── Display Mode ── */
             <>
               <div className="rounded-2xl bg-gray-50 px-3 py-2 shadow-sm border border-gray-100/50 relative inline-block max-w-full">
                 <div className="flex items-center gap-1 mb-0.5 flex-wrap">
@@ -343,7 +355,6 @@ function CommentItem({
                 </div>
                 <p className="text-[12px] text-gray-600 leading-relaxed break-words whitespace-pre-wrap">{comment.content}</p>
 
-                {/* Like badge */}
                 {likeCount > 0 && (
                   <div className="absolute -bottom-2.5 right-2 flex items-center gap-0.5 bg-white rounded-full px-1.5 py-0.5 shadow-md border border-gray-100">
                     <svg className="h-2.5 w-2.5 text-red-500" fill="currentColor" viewBox="0 0 24 24">
@@ -353,7 +364,6 @@ function CommentItem({
                   </div>
                 )}
 
-                {/* Menu (owner only) - SELALU TAMPIL UNTUK OWNER */}
                 {isOwner && (
                   <div className="absolute top-1.5 right-1.5">
                     <button
@@ -399,7 +409,6 @@ function CommentItem({
                 )}
               </div>
 
-              {/* Action row: time, like, reply */}
               <div className="flex items-center gap-3 mt-1 px-1.5">
                 <span className="text-[10px] text-gray-400">{timeAgo(comment.created_at)}</span>
                 <button
@@ -430,7 +439,15 @@ function CommentItem({
                   ↩ Membalas <span className="font-semibold">{commenterName}</span>
                 </p>
               </div>
-              <div className="flex items-center gap-2 p-2">
+              {/* PERBAIKAN: Ganti dari <div> biasa ke <form> agar Enter bisa di-handle dengan benar */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleSubmitReply();
+                }}
+                className="flex items-center gap-2 p-2"
+              >
                 <div className="h-6 w-6 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0 overflow-hidden">
                   {currentUser.avatar_url ? (
                     <img src={currentUser.avatar_url} alt="" className="h-full w-full object-cover" />
@@ -447,18 +464,16 @@ function CommentItem({
                   className="flex-1 text-[11px] text-gray-800 placeholder-gray-400 bg-gray-50 rounded-full px-3 py-1.5 border border-gray-200 focus:border-blue-300 focus:outline-none focus:ring-1 focus:ring-blue-100 transition"
                   disabled={sending}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleSubmitReply();
-                    }
                     if (e.key === 'Escape') {
+                      e.preventDefault();
                       setIsReplying(false);
                       setReplyText('');
                     }
+                    // Enter akan di-handle oleh form onSubmit
                   }}
                 />
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     setIsReplying(false);
@@ -469,12 +484,7 @@ function CommentItem({
                   ✕
                 </button>
                 <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleSubmitReply();
-                  }}
+                  type="submit"
                   disabled={!replyText.trim() || sending}
                   className="h-7 w-7 rounded-full bg-blue-500 text-white flex items-center justify-center hover:bg-blue-600 transition disabled:opacity-30 active:scale-90 flex-shrink-0"
                 >
@@ -486,14 +496,13 @@ function CommentItem({
                     </svg>
                   )}
                 </button>
-              </div>
+              </form>
             </div>
           )}
 
-          {/* ── Replies Section (dari tabel comment_replies) ── */}
+          {/* ── Replies Section ── */}
           {replyCount > 0 && (
             <div className="mt-1.5 relative">
-              {/* Garis vertikal penghubung */}
               <div className="absolute left-[0.55rem] top-0 bottom-2 w-px bg-gray-200/80" />
 
               {!showReplies ? (
