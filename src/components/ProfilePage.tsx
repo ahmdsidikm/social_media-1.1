@@ -38,6 +38,7 @@ export function ProfilePage({
   const [followersList, setFollowersList] = useState<User[]>([]);
   const [followingList, setFollowingList] = useState<User[]>([]);
   const [cropImage, setCropImage] = useState<string | null>(null);
+  const [cropCoverImage, setCropCoverImage] = useState<string | null>(null);
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
   const [showCreatePost, setShowCreatePost] = useState(false);
   const [postContent, setPostContent] = useState('');
@@ -51,7 +52,7 @@ export function ProfilePage({
   const [selectedPhotoPost, setSelectedPhotoPost] = useState<Post | null>(null);
   const [cropPostImage, setCropPostImage] = useState<string | null>(null);
 
-  // ✅ NEW: Edit post states
+  // Edit post states
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [editPostContent, setEditPostContent] = useState('');
   const [editPostImgFile, setEditPostImgFile] = useState<File | null>(null);
@@ -74,6 +75,9 @@ export function ProfilePage({
   const myPosts = posts.filter((p) => p.user_id === displayUser.id);
   const isOwnProfile = !viewingUser || viewingUser.id === currentUser.id;
   const photoPosts = myPosts.filter((p) => p.image_url && p.image_url.length > 0);
+
+  // Cover aspect ratio: match the cover area (h-36 sm:h-44, full width ~16:9 area)
+  const COVER_ASPECT_RATIO = 16 / 5;
 
   const fetchFollowData = useCallback(async () => {
     const { count: fCount } = await supabase
@@ -195,16 +199,25 @@ export function ProfilePage({
     if (!error && data) onUserUpdate(data);
   };
 
-  const handleCoverChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Cover: select file → open cropper
+  const handleCoverSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) { alert('Hanya file gambar'); return; }
     if (file.size > 5 * 1024 * 1024) { alert('Max 5MB'); return; }
+    const reader = new FileReader();
+    reader.onloadend = () => setCropCoverImage(reader.result as string);
+    reader.readAsDataURL(file);
+    if (coverInputRef.current) coverInputRef.current.value = '';
+  };
+
+  // Cover: upload cropped blob
+  const handleCroppedCover = async (blob: Blob) => {
+    setCropCoverImage(null);
     setCoverUploading(true);
     try {
-      const ext = file.name.split('.').pop() || 'jpg';
-      const fileName = `cover_${currentUser.id}_${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from('covers').upload(fileName, file, { upsert: true });
+      const fileName = `cover_${currentUser.id}_${Date.now()}.jpg`;
+      const { error: upErr } = await supabase.storage.from('covers').upload(fileName, blob, { upsert: true });
       if (upErr) { alert('Gagal upload cover: ' + upErr.message); setCoverUploading(false); return; }
       const { data: urlData } = supabase.storage.from('covers').getPublicUrl(fileName);
       const { data, error } = await supabase.from('users').update({ cover_url: urlData.publicUrl }).eq('id', currentUser.id).select().single();
@@ -213,7 +226,6 @@ export function ProfilePage({
       alert('Gagal mengunggah cover');
     }
     setCoverUploading(false);
-    if (coverInputRef.current) coverInputRef.current.value = '';
   };
 
   const handleDeleteCover = async () => {
@@ -291,7 +303,6 @@ export function ProfilePage({
     }
   };
 
-  // ✅ NEW: Open edit modal
   const handleOpenEditPost = (post: Post) => {
     setEditingPost(post);
     setEditPostContent(post.content || '');
@@ -303,7 +314,6 @@ export function ProfilePage({
     setEditKeepOriginalVideo(!!(post.video_url));
   };
 
-  // ✅ NEW: Handle edit post image select (crop 4:5)
   const handleEditPostImg = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -316,7 +326,6 @@ export function ProfilePage({
     }
   };
 
-  // ✅ NEW: Handle cropped edit post image
   const handleCroppedEditPostImg = (blob: Blob) => {
     setCropEditPostImage(null);
     const file = new File([blob], `edit_post_${Date.now()}.jpg`, { type: 'image/jpeg' });
@@ -328,7 +337,6 @@ export function ProfilePage({
     setEditKeepOriginalVideo(false);
   };
 
-  // ✅ NEW: Handle edit post video
   const handleEditPostVideo = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -342,7 +350,6 @@ export function ProfilePage({
     }
   };
 
-  // ✅ NEW: Submit edit post
   const handleSubmitEditPost = async () => {
     if (!editingPost) return;
     if (!editPostContent.trim() && !editPostImgPreview && !editPostVideoPreview) return;
@@ -351,7 +358,6 @@ export function ProfilePage({
     let imageUrl = editKeepOriginalImage ? (editingPost.image_url || '') : '';
     let videoUrl = editKeepOriginalVideo ? (editingPost.video_url || '') : '';
 
-    // Upload new image if changed
     if (editPostImgFile) {
       const ext = editPostImgFile.name.split('.').pop();
       const name = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
@@ -362,7 +368,6 @@ export function ProfilePage({
       }
     }
 
-    // Upload new video if changed
     if (editPostVideoFile) {
       const ext = editPostVideoFile.name.split('.').pop();
       const name = `vid_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
@@ -381,12 +386,11 @@ export function ProfilePage({
         video_url: videoUrl,
       })
       .eq('id', editingPost.id)
-      .eq('user_id', currentUser.id); // Safety: only own posts
+      .eq('user_id', currentUser.id);
 
     if (error) {
       alert('Gagal mengedit postingan: ' + error.message);
     } else {
-      // If we were viewing this post in photo tab, update it
       if (selectedPhotoPost?.id === editingPost.id) {
         setSelectedPhotoPost(null);
       }
@@ -404,11 +408,20 @@ export function ProfilePage({
 
   const hasStory = stories.length > 0;
 
+  // Helper: navigate to profile and scroll to top
+  const handleViewProfile = (user: User) => {
+    if (user.id === currentUser.id) {
+      onSetViewingUser(null);
+    } else if (user.id !== displayUser.id) {
+      onSetViewingUser(user);
+    }
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  };
+
   const UserPopupItem = ({ user }: { user: User }) => (
     <button
       onClick={() => {
-        if (user.id === currentUser.id) { onSetViewingUser(null); }
-        else { onSetViewingUser(user); }
+        handleViewProfile(user);
         setShowFollowersPopup(false);
         setShowFollowingPopup(false);
       }}
@@ -439,7 +452,7 @@ export function ProfilePage({
           )}
           {isOwnProfile && (
             <>
-              <input ref={coverInputRef} type="file" accept="image/*" onChange={handleCoverChange} className="hidden" />
+              <input ref={coverInputRef} type="file" accept="image/*" onChange={handleCoverSelect} className="hidden" />
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-300 flex items-center justify-center">
                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300">
                   <button
@@ -647,7 +660,7 @@ export function ProfilePage({
                 onComment={onComment}
                 onDeletePost={onDeletePost}
                 onDeleteComment={onDeleteComment}
-                onViewProfile={(u) => { if (u.id !== displayUser.id) onSetViewingUser(u); }}
+                onViewProfile={(u) => handleViewProfile(u)}
                 onEditPost={isOwnProfile ? handleOpenEditPost : undefined}
               />
             ))}
@@ -673,7 +686,7 @@ export function ProfilePage({
                 onComment={onComment}
                 onDeletePost={(id) => { onDeletePost(id); setSelectedPhotoPost(null); }}
                 onDeleteComment={onDeleteComment}
-                onViewProfile={(u) => { if (u.id !== displayUser.id) onSetViewingUser(u); }}
+                onViewProfile={(u) => handleViewProfile(u)}
                 onEditPost={isOwnProfile ? handleOpenEditPost : undefined}
               />
             </div>
@@ -926,7 +939,7 @@ export function ProfilePage({
         </div>
       )}
 
-      {/* ✅ NEW: Edit Post Modal */}
+      {/* Edit Post Modal */}
       {editingPost && (
         <div
           className="fixed inset-0 z-[999] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
@@ -980,7 +993,6 @@ export function ProfilePage({
                 className="w-full resize-none text-sm text-gray-800 placeholder-gray-400 focus:outline-none leading-relaxed mb-3 bg-transparent"
                 autoFocus
               />
-              {/* Image preview */}
               {editPostImgPreview && (
                 <div className="relative mb-3 rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(0,0,0,0.08)' }}>
                   <div style={{ aspectRatio: '4/5' }}>
@@ -1004,7 +1016,6 @@ export function ProfilePage({
                   >×</button>
                 </div>
               )}
-              {/* Video preview */}
               {editPostVideoPreview && (
                 <div className="relative mb-3 rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(0,0,0,0.08)' }}>
                   <video src={editPostVideoPreview} controls className="w-full max-h-60" />
@@ -1060,6 +1071,16 @@ export function ProfilePage({
         />
       )}
 
+      {/* Cover Cropper (16:5 - matches cover area ratio) */}
+      {cropCoverImage && (
+        <ImageCropper
+          imageSrc={cropCoverImage}
+          onCrop={handleCroppedCover}
+          onCancel={() => setCropCoverImage(null)}
+          aspectRatio={COVER_ASPECT_RATIO}
+        />
+      )}
+
       {/* Post Photo Cropper (4:5) */}
       {cropPostImage && (
         <ImageCropper
@@ -1070,7 +1091,7 @@ export function ProfilePage({
         />
       )}
 
-      {/* ✅ NEW: Edit Post Photo Cropper (4:5) */}
+      {/* Edit Post Photo Cropper (4:5) */}
       {cropEditPostImage && (
         <ImageCropper
           imageSrc={cropEditPostImage}
