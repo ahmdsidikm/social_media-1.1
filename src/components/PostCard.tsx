@@ -10,11 +10,12 @@ type Props = {
   onComment: (postId: string, content: string) => void;
   onDeletePost: (postId: string) => void;
   onDeleteComment: (commentId: string) => void;
+  onEditComment?: (commentId: string, newContent: string) => void;
   onViewProfile?: (user: User) => void;
   onEditPost?: (post: Post) => void;
 };
 
-export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, onDeleteComment, onViewProfile, onEditPost }: Props) {
+export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, onDeleteComment, onEditComment, onViewProfile, onEditPost }: Props) {
   const [commentText, setCommentText] = useState('');
   const [showComments, setShowComments] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -23,6 +24,17 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
   const [likerUsers, setLikerUsers] = useState<User[]>([]);
   const [likersLoading, setLikersLoading] = useState(false);
   const [likersFetched, setLikersFetched] = useState(false);
+
+  // Comment editing state
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingCommentText, setEditingCommentText] = useState('');
+
+  // Comment menu state
+  const [commentMenuId, setCommentMenuId] = useState<string | null>(null);
+
+  // Visible comments control
+  const COMMENTS_PER_PAGE = 5;
+  const [visibleCommentsCount, setVisibleCommentsCount] = useState(COMMENTS_PER_PAGE);
 
   const isLiked = post.likes?.some((l: Like) => l.user_id === currentUser.id) || false;
   const likeCount = post.likes?.length || 0;
@@ -37,7 +49,6 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
 
   const MAX_VISIBLE_LIKERS = 5;
 
-  // Fetch liker users with profile info
   const fetchLikerUsers = useCallback(async () => {
     if (!post.likes || post.likes.length === 0) return;
     if (likersFetched) return;
@@ -53,17 +64,24 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
     setLikersLoading(false);
   }, [post.likes, likersFetched]);
 
-  // Fetch likers when there are likes
   useEffect(() => {
     if (likeCount > 0 && !likersFetched) {
       fetchLikerUsers();
     }
   }, [likeCount, likersFetched, fetchLikerUsers]);
 
-  // Reset fetched state when likes change
   useEffect(() => {
     setLikersFetched(false);
   }, [likeCount]);
+
+  // Reset visible comments when toggling
+  useEffect(() => {
+    if (!showComments) {
+      setVisibleCommentsCount(COMMENTS_PER_PAGE);
+      setEditingCommentId(null);
+      setCommentMenuId(null);
+    }
+  }, [showComments]);
 
   const handleSubmitComment = (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,8 +95,40 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
     if (onViewProfile && post.users) onViewProfile(post.users);
   };
 
+  const handleLikeClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onLike(post.id);
+  };
+
+  const handleStartEditComment = (comment: Comment) => {
+    setEditingCommentId(comment.id);
+    setEditingCommentText(comment.content);
+    setCommentMenuId(null);
+  };
+
+  const handleSaveEditComment = () => {
+    if (editingCommentId && editingCommentText.trim() && onEditComment) {
+      onEditComment(editingCommentId, editingCommentText.trim());
+    }
+    setEditingCommentId(null);
+    setEditingCommentText('');
+  };
+
+  const handleCancelEditComment = () => {
+    setEditingCommentId(null);
+    setEditingCommentText('');
+  };
+
   const visibleLikers = likerUsers.slice(0, MAX_VISIBLE_LIKERS);
   const remainingLikersCount = likerUsers.length - MAX_VISIBLE_LIKERS;
+
+  const sortedComments = post.comments ? [...post.comments].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  ) : [];
+  const visibleComments = sortedComments.slice(0, visibleCommentsCount);
+  const hasMoreComments = sortedComments.length > visibleCommentsCount;
+  const hiddenCommentsCount = sortedComments.length - visibleCommentsCount;
 
   return (
     <div className="bg-white border-b border-gray-100">
@@ -163,13 +213,17 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
 
       {/* ══════════ Image ══════════ */}
       {post.image_url && !isVideo && (
-        <div className="mt-1 relative group">
+        <div className="mt-1 relative">
           <img
             src={post.image_url}
             alt="Post"
             className="w-full max-h-[80vh] object-contain cursor-pointer hover:brightness-[0.92] transition-all duration-200"
             loading="lazy"
-            onClick={() => setShowLightbox(true)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowLightbox(true);
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
           />
         </div>
       )}
@@ -188,7 +242,7 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
       {/* ══════════ Actions (Like & Comment buttons with counts) ══════════ */}
       <div className="flex border-t border-gray-50">
         <button
-          onClick={() => onLike(post.id)}
+          onClick={handleLikeClick}
           className={`flex flex-1 items-center justify-center gap-2 py-3 text-sm font-medium transition-all active:scale-95 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}`}
         >
           {isLiked ? (
@@ -221,7 +275,6 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
       {likeCount > 0 && (
         <div className="px-4 py-2.5 border-t border-gray-50">
           <div className="flex items-center gap-2">
-            {/* Stacked avatars */}
             <div className="flex items-center">
               {likersLoading ? (
                 <div className="flex items-center gap-2">
@@ -249,7 +302,6 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
                     ))}
                   </div>
 
-                  {/* Names text */}
                   <div className="ml-2.5 flex-1 min-w-0">
                     <p className="text-xs text-gray-500 truncate">
                       <span className="font-semibold text-gray-700">
@@ -274,7 +326,6 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
                     </p>
                   </div>
 
-                  {/* More button */}
                   {remainingLikersCount > 0 && (
                     <button
                       onClick={() => setShowAllLikers(!showAllLikers)}
@@ -308,7 +359,6 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
                   border: '1px solid rgba(0,0,0,0.05)',
                 }}
               >
-                {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
                   <div className="flex items-center gap-2">
                     <div className="h-6 w-6 rounded-full bg-gradient-to-br from-red-400 to-pink-500 flex items-center justify-center">
@@ -324,7 +374,6 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
                   </button>
                 </div>
 
-                {/* Full List */}
                 <div className="max-h-48 overflow-y-auto p-2" style={{ scrollbarWidth: 'thin' }}>
                   <div className="space-y-0.5">
                     {likerUsers.map((user) => (
@@ -368,16 +417,37 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
       {/* ══════════ Comments Section ══════════ */}
       {showComments && (
         <div className="border-t border-gray-50 bg-gray-50/50">
-          {/* Comments list */}
-          {post.comments && post.comments.length > 0 && (
-            <div className="max-h-72 overflow-y-auto px-4 pt-3 pb-1 space-y-3" style={{ scrollbarWidth: 'thin' }}>
-              {post.comments.map((comment: Comment) => {
+          {/* Load more (older) comments button - shown at top */}
+          {hasMoreComments && (
+            <button
+              onClick={() => setVisibleCommentsCount(prev => prev + COMMENTS_PER_PAGE)}
+              className="w-full py-2.5 text-xs font-medium text-blue-500 hover:text-blue-600 hover:bg-blue-50/50 transition flex items-center justify-center gap-1.5"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+              </svg>
+              <span>Lihat {hiddenCommentsCount} komentar lainnya</span>
+            </button>
+          )}
+
+          {/* Comments list - max 5 visible, scrollable */}
+          {sortedComments.length > 0 && (
+            <div
+              className="overflow-y-auto px-4 pt-3 pb-1 space-y-3"
+              style={{
+                maxHeight: '360px',
+                scrollbarWidth: 'thin',
+              }}
+            >
+              {visibleComments.map((comment: Comment) => {
                 const commenterName = comment.users?.display_name || 'Unknown';
                 const commenterAvatar = comment.users?.avatar_url;
                 const isCommentOwner = comment.user_id === currentUser.id;
+                const isEditing = editingCommentId === comment.id;
+                const isCommentEdited = comment.updated_at && comment.updated_at !== comment.created_at;
 
                 return (
-                  <div key={comment.id} className="flex items-start gap-2.5">
+                  <div key={comment.id} className="flex items-start gap-2.5 group/comment">
                     <button
                       onClick={() => { if (onViewProfile && comment.users) onViewProfile(comment.users); }}
                       className="h-8 w-8 rounded-full bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0 overflow-hidden hover:ring-2 hover:ring-blue-200 transition shadow-sm"
@@ -390,36 +460,128 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
                     </button>
 
                     <div className="flex-1 min-w-0">
-                      <div className="rounded-2xl bg-white px-3.5 py-2.5 shadow-sm border border-gray-100/50">
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <button
-                            onClick={() => { if (onViewProfile && comment.users) onViewProfile(comment.users); }}
-                            className="text-[13px] font-semibold text-gray-800 hover:text-blue-600 transition leading-tight"
-                          >
-                            {commenterName}
-                          </button>
-                          {isCommentOwner && (
-                            <span className="text-[9px] bg-blue-100 text-blue-500 px-1.5 py-0.5 rounded-full font-medium leading-none">
-                              kamu
+                      {isEditing ? (
+                        /* ── Editing Mode ── */
+                        <div className="rounded-2xl bg-white px-3.5 py-2.5 shadow-sm border-2 border-blue-200">
+                          <div className="flex items-center gap-1.5 mb-2">
+                            <span className="text-[13px] font-semibold text-gray-800">{commenterName}</span>
+                            <span className="text-[9px] bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded-full font-medium leading-none">
+                              mengedit
                             </span>
-                          )}
-                        </div>
-                        <p className="text-[13px] text-gray-600 leading-relaxed break-words">{comment.content}</p>
-                      </div>
-
-                      <div className="flex items-center gap-3 mt-1.5 px-2">
-                        <span className="text-[11px] text-gray-400">{timeAgo(comment.created_at)}</span>
-                        {isCommentOwner && (
-                          <button
-                            onClick={() => {
-                              if (confirm('Hapus komentar ini?')) onDeleteComment(comment.id);
+                          </div>
+                          <textarea
+                            value={editingCommentText}
+                            onChange={(e) => setEditingCommentText(e.target.value)}
+                            className="w-full text-[13px] text-gray-700 leading-relaxed bg-gray-50 rounded-xl px-3 py-2 border border-gray-200 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-50 resize-none transition"
+                            rows={2}
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                handleSaveEditComment();
+                              }
+                              if (e.key === 'Escape') handleCancelEditComment();
                             }}
-                            className="text-[11px] text-gray-400 hover:text-red-500 font-medium transition"
-                          >
-                            Hapus
-                          </button>
-                        )}
-                      </div>
+                          />
+                          <div className="flex items-center justify-between mt-2">
+                            <span className="text-[10px] text-gray-400">Enter simpan · Esc batal</span>
+                            <div className="flex gap-1.5">
+                              <button
+                                onClick={handleCancelEditComment}
+                                className="px-2.5 py-1 text-[11px] font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition"
+                              >
+                                Batal
+                              </button>
+                              <button
+                                onClick={handleSaveEditComment}
+                                disabled={!editingCommentText.trim()}
+                                className="px-2.5 py-1 text-[11px] font-semibold text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition disabled:opacity-40"
+                              >
+                                Simpan
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* ── Display Mode ── */
+                        <>
+                          <div className="rounded-2xl bg-white px-3.5 py-2.5 shadow-sm border border-gray-100/50 relative">
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              <button
+                                onClick={() => { if (onViewProfile && comment.users) onViewProfile(comment.users); }}
+                                className="text-[13px] font-semibold text-gray-800 hover:text-blue-600 transition leading-tight"
+                              >
+                                {commenterName}
+                              </button>
+                              {isCommentOwner && (
+                                <span className="text-[9px] bg-blue-100 text-blue-500 px-1.5 py-0.5 rounded-full font-medium leading-none">
+                                  kamu
+                                </span>
+                              )}
+                              {isCommentEdited && (
+                                <span className="text-[9px] text-gray-300 italic" title={`Diedit ${timeAgo(comment.updated_at!)}`}>
+                                  diedit
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[13px] text-gray-600 leading-relaxed break-words">{comment.content}</p>
+
+                            {/* Comment menu button - only for owner */}
+                            {isCommentOwner && (
+                              <div className="absolute top-2 right-2">
+                                <button
+                                  onClick={() => setCommentMenuId(commentMenuId === comment.id ? null : comment.id)}
+                                  className="h-6 w-6 rounded-full flex items-center justify-center text-gray-300 hover:text-gray-500 hover:bg-gray-100 opacity-0 group-hover/comment:opacity-100 transition-all"
+                                >
+                                  <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                                    <circle cx="6" cy="12" r="1.5" />
+                                    <circle cx="12" cy="12" r="1.5" />
+                                    <circle cx="18" cy="12" r="1.5" />
+                                  </svg>
+                                </button>
+
+                                {/* Comment dropdown menu */}
+                                {commentMenuId === comment.id && (
+                                  <>
+                                    <div className="fixed inset-0 z-10" onClick={() => setCommentMenuId(null)} />
+                                    <div className="absolute right-0 top-7 z-20 w-36 rounded-xl bg-white shadow-xl border border-gray-100 py-1 overflow-hidden">
+                                      {onEditComment && (
+                                        <button
+                                          onClick={() => handleStartEditComment(comment)}
+                                          className="w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-amber-50 hover:text-amber-600 flex items-center gap-2 transition-colors"
+                                        >
+                                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                          </svg>
+                                          Edit
+                                        </button>
+                                      )}
+                                      <button
+                                        onClick={() => {
+                                          if (confirm('Hapus komentar ini?')) {
+                                            onDeleteComment(comment.id);
+                                          }
+                                          setCommentMenuId(null);
+                                        }}
+                                        className="w-full px-3 py-2 text-left text-xs text-red-500 hover:bg-red-50 flex items-center gap-2 transition-colors"
+                                      >
+                                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                        Hapus
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-3 mt-1.5 px-2">
+                            <span className="text-[11px] text-gray-400">{timeAgo(comment.created_at)}</span>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
@@ -428,7 +590,7 @@ export function PostCard({ post, currentUser, onLike, onComment, onDeletePost, o
           )}
 
           {/* Empty comments */}
-          {(!post.comments || post.comments.length === 0) && (
+          {sortedComments.length === 0 && (
             <div className="flex flex-col items-center justify-center py-8">
               <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center mb-2">
                 <svg className="h-5 w-5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
