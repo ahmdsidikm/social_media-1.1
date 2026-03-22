@@ -43,20 +43,36 @@ export type CommentLike = {
   comment_id: string;
   user_id: string;
   created_at: string;
-  users?: User;
 };
 
-// ✅ Hanya SATU definisi Comment (digabung)
+export type ReplyLike = {
+  id: string;
+  reply_id: string;
+  user_id: string;
+  created_at: string;
+};
+
+export type CommentReply = {
+  id: string;
+  comment_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  updated_at?: string;
+  users?: User;
+  reply_likes?: ReplyLike[];
+};
+
 export type Comment = {
   id: string;
   post_id: string;
   user_id: string;
   content: string;
-  parent_id?: string | null;
   created_at: string;
   updated_at?: string;
   users?: User;
   comment_likes?: CommentLike[];
+  comment_replies?: CommentReply[];
 };
 
 export type Follower = {
