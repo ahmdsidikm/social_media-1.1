@@ -441,7 +441,7 @@ export function ProfilePage({
       {/* Profile Header */}
       <div className="mb-0 bg-white overflow-hidden">
         {/* Cover - 16:9 aspect ratio */}
-        <div className="relative w-full overflow-hidden group" style={{ aspectRatio: '16/9' }}>
+        <div className="relative w-full overflow-hidden group" style={{ aspectRatio: '16/5' }}>
           {displayUser.cover_url ? (
             <img
               src={displayUser.cover_url}
