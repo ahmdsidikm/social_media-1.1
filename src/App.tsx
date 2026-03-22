@@ -15,18 +15,12 @@ const extractStoragePath = (url: string): { bucket: string; path: string } | nul
   try {
     const storagePattern = /\/storage\/v1\/object\/public\/([^/]+)\/(.+)/;
     const match = url.match(storagePattern);
-    if (match) {
-      return { bucket: match[1], path: decodeURIComponent(match[2]) };
-    }
+    if (match) return { bucket: match[1], path: decodeURIComponent(match[2]) };
     const signedPattern = /\/storage\/v1\/object\/sign\/([^/]+)\/(.+)/;
     const signedMatch = url.match(signedPattern);
-    if (signedMatch) {
-      return { bucket: signedMatch[1], path: decodeURIComponent(signedMatch[2].split('?')[0]) };
-    }
+    if (signedMatch) return { bucket: signedMatch[1], path: decodeURIComponent(signedMatch[2].split('?')[0]) };
     return null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 };
 
 const deleteFileFromStorage = async (fileUrl: string): Promise<boolean> => {
@@ -74,23 +68,14 @@ export function App() {
   const mainContentRef = useRef<HTMLElement>(null);
   const isOnGroupsPageRef = useRef(false);
 
-  // Scroll position memory
   const scrollPositions = useRef<Record<Page, number>>({
-    home: 0,
-    messages: 0,
-    groups: 0,
-    search: 0,
-    profile: 0,
+    home: 0, messages: 0, groups: 0, search: 0, profile: 0,
   });
-  const previousPage = useRef<Page>('home');
 
   useEffect(() => {
     const savedUserId = localStorage.getItem('sosmedku_user_id');
-    if (savedUserId) {
-      loadUser(savedUserId);
-    } else {
-      setLoading(false);
-    }
+    if (savedUserId) loadUser(savedUserId);
+    else setLoading(false);
   }, []);
 
   const loadUser = async (userId: string) => {
@@ -138,12 +123,7 @@ export function App() {
   }, [currentUser]);
 
   useEffect(() => {
-    if (currentUser) {
-      fetchPosts();
-      fetchFollowingIds();
-      fetchUnreadMessages();
-      fetchUnreadGroups();
-    }
+    if (currentUser) { fetchPosts(); fetchFollowingIds(); fetchUnreadMessages(); fetchUnreadGroups(); }
   }, [currentUser, fetchPosts, fetchFollowingIds, fetchUnreadMessages, fetchUnreadGroups]);
 
   useEffect(() => {
@@ -171,73 +151,47 @@ export function App() {
       .channel('groups-notification')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'group_messages' }, (payload) => {
         if (payload.new && (payload.new as any).user_id === currentUser.id) return;
-        if (isOnGroupsPageRef.current) {
-          setGroupsLastRead(currentUser.id);
-          setUnreadGroups(0);
-          return;
-        }
+        if (isOnGroupsPageRef.current) { setGroupsLastRead(currentUser.id); setUnreadGroups(0); return; }
         fetchUnreadGroups();
       })
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(messageChannel);
-      supabase.removeChannel(groupChannel);
-    };
+    return () => { supabase.removeChannel(messageChannel); supabase.removeChannel(groupChannel); };
   }, [currentUser, fetchUnreadMessages, fetchUnreadGroups, currentPage]);
 
-  // Save scroll position before page change & restore after
   useEffect(() => {
     if (!currentUser) return;
-
-    // Clear notifications when opening specific pages
-    if (currentPage === 'messages') {
-      setUnreadMessages(0);
-    }
+    if (currentPage === 'messages') setUnreadMessages(0);
     if (currentPage === 'groups') {
       isOnGroupsPageRef.current = true;
       setGroupsLastRead(currentUser.id);
       setUnreadGroups(0);
     } else {
-      if (isOnGroupsPageRef.current) {
-        setGroupsLastRead(currentUser.id);
-      }
+      if (isOnGroupsPageRef.current) setGroupsLastRead(currentUser.id);
       isOnGroupsPageRef.current = false;
     }
 
-    // Restore scroll position for the new page
     const timer = setTimeout(() => {
-      const savedPos = scrollPositions.current[currentPage];
-      window.scrollTo({ top: savedPos, behavior: 'instant' as ScrollBehavior });
+      window.scrollTo({ top: scrollPositions.current[currentPage], behavior: 'instant' as ScrollBehavior });
     }, 50);
-
     return () => clearTimeout(timer);
   }, [currentPage, currentUser]);
 
-  // Track scroll position continuously
   useEffect(() => {
-    const handleScroll = () => {
-      scrollPositions.current[currentPage] = window.scrollY;
-    };
+    const handleScroll = () => { scrollPositions.current[currentPage] = window.scrollY; };
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, [currentPage]);
 
   const handleNavClick = (page: Page) => {
     if (currentPage === page) {
-      // Same page clicked - scroll to top
       window.scrollTo({ top: 0, behavior: 'smooth' });
       scrollPositions.current[page] = 0;
       if (page === 'profile') setViewingUser(null);
       if (page === 'messages') setChatTarget(null);
-      if (page === 'groups' && currentUser) {
-        setGroupsLastRead(currentUser.id);
-        setUnreadGroups(0);
-      }
+      if (page === 'groups' && currentUser) { setGroupsLastRead(currentUser.id); setUnreadGroups(0); }
     } else {
-      // Save current scroll position before switching
       scrollPositions.current[currentPage] = window.scrollY;
-      previousPage.current = currentPage;
       setCurrentPage(page);
       if (page === 'profile') setViewingUser(null);
       if (page !== 'messages') setChatTarget(null);
@@ -263,11 +217,8 @@ export function App() {
     const post = posts.find((p) => p.id === postId);
     if (!post) return;
     const existingLike = post.likes?.find((l: Like) => l.user_id === currentUser.id);
-    if (existingLike) {
-      await supabase.from('likes').delete().match({ post_id: postId, user_id: currentUser.id });
-    } else {
-      await supabase.from('likes').insert({ post_id: postId, user_id: currentUser.id });
-    }
+    if (existingLike) await supabase.from('likes').delete().match({ post_id: postId, user_id: currentUser.id });
+    else await supabase.from('likes').insert({ post_id: postId, user_id: currentUser.id });
     await fetchPosts();
   };
 
@@ -327,16 +278,14 @@ export function App() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-500 border-t-transparent"></div>
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
           <p className="text-gray-500">Memuat...</p>
         </div>
       </div>
     );
   }
 
-  if (!currentUser) {
-    return <LoginPage onLogin={handleLogin} />;
-  }
+  if (!currentUser) return <LoginPage onLogin={handleLogin} />;
 
   const NotificationBadge = ({ count }: { count: number }) => {
     if (count <= 0) return null;
@@ -350,76 +299,44 @@ export function App() {
   const navItemsBase: { page: Page; label: string; badge: number; icon: React.ReactNode }[] = [
     {
       page: 'home', label: 'Beranda', badge: 0,
-      icon: (
-        <svg className="h-6 w-6 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-        </svg>
-      ),
+      icon: <svg className="h-[22px] w-[22px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>,
     },
     {
       page: 'messages', label: 'Pesan', badge: unreadMessages,
-      icon: (
-        <svg className="h-6 w-6 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-        </svg>
-      ),
+      icon: <svg className="h-[22px] w-[22px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>,
     },
     {
       page: 'groups', label: 'Grup', badge: unreadGroups,
-      icon: (
-        <svg className="h-6 w-6 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-        </svg>
-      ),
+      icon: <svg className="h-[22px] w-[22px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>,
     },
     {
       page: 'search', label: 'Cari', badge: 0,
-      icon: (
-        <svg className="h-6 w-6 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
-      ),
+      icon: <svg className="h-[22px] w-[22px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>,
     },
   ];
 
   const profileNavItem = {
     page: 'profile' as Page, label: 'Profil', badge: 0,
-    icon: (
-      <svg className="h-6 w-6 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-      </svg>
-    ),
+    icon: <svg className="h-6 w-6 md:h-[22px] md:w-[22px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
   };
-
-  // Dynamic sidebar width for main content margin
-  const sidebarCollapsedWidth = 'md:ml-[68px]';
-  const sidebarExpandedWidth = 'md:ml-[68px]'; // Main content stays fixed, sidebar overlaps
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Desktop Sidebar */}
+      {/* Sidebar */}
       <aside
         onMouseEnter={() => setSidebarHovered(true)}
         onMouseLeave={() => setSidebarHovered(false)}
         className={`
           fixed bottom-0 left-0 right-0 z-50
           md:top-0 md:right-auto md:bottom-0 md:h-screen
-          md:border-r md:border-white/20
-          transition-all duration-300 ease-in-out
-          ${sidebarHovered ? 'md:w-56 lg:w-64' : 'md:w-[68px]'}
+          transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)]
+          ${sidebarHovered ? 'md:w-60' : 'md:w-[68px]'}
         `}
-        style={{
-          WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-          backdropFilter: 'blur(40px) saturate(1.8)',
-        }}
       >
-        {/* Mobile Bottom Bar */}
+        {/* ===== Mobile Bottom Bar ===== */}
         <div
-          className="md:hidden border-t border-white/20 bg-white/60 backdrop-blur-2xl backdrop-saturate-150"
-          style={{
-            WebkitBackdropFilter: 'blur(40px) saturate(1.5)',
-            backdropFilter: 'blur(40px) saturate(1.5)',
-          }}
+          className="md:hidden border-t border-white/20 bg-white/60 backdrop-blur-2xl"
+          style={{ WebkitBackdropFilter: 'blur(40px) saturate(1.5)', backdropFilter: 'blur(40px) saturate(1.5)' }}
         >
           <nav className="flex justify-around px-2 py-1">
             {[...navItemsBase, profileNavItem].map((item) => (
@@ -427,9 +344,7 @@ export function App() {
                 key={item.page}
                 onClick={() => handleNavClick(item.page)}
                 className={`relative flex flex-col items-center gap-0.5 px-3 py-2 rounded-2xl text-[10px] font-medium transition-all duration-300 ${
-                  currentPage === item.page
-                    ? 'text-blue-600'
-                    : 'text-gray-400 active:text-gray-600 active:scale-95'
+                  currentPage === item.page ? 'text-blue-600' : 'text-gray-400 active:text-gray-600 active:scale-95'
                 }`}
               >
                 {currentPage === item.page && (
@@ -447,24 +362,23 @@ export function App() {
           </nav>
         </div>
 
-        {/* Desktop Sidebar Content */}
+        {/* ===== Desktop Sidebar ===== */}
         <div
-          className="hidden md:flex md:flex-col md:h-full bg-white/70 backdrop-blur-xl border-r border-gray-200/50"
-          style={{
-            WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-            backdropFilter: 'blur(40px) saturate(1.8)',
-          }}
+          className="hidden md:flex md:flex-col md:h-full bg-white/80 border-r border-gray-200/50 backdrop-blur-xl"
+          style={{ WebkitBackdropFilter: 'blur(40px) saturate(1.8)', backdropFilter: 'blur(40px) saturate(1.8)' }}
         >
           {/* Logo */}
-          <div className={`flex items-center gap-2.5 py-4 border-b border-gray-100/60 transition-all duration-300 ${sidebarHovered ? 'px-5' : 'px-0 justify-center'}`}>
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-md flex-shrink-0">
-              <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
+          <div className="flex items-center h-[60px] border-b border-gray-100/60 px-0">
+            <div className="flex items-center justify-center w-[68px] flex-shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-md">
+                <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+              </div>
             </div>
             <span
               className={`text-lg font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent whitespace-nowrap transition-all duration-300 overflow-hidden ${
-                sidebarHovered ? 'opacity-100 max-w-[200px]' : 'opacity-0 max-w-0'
+                sidebarHovered ? 'opacity-100 w-auto' : 'opacity-0 w-0'
               }`}
             >
               SosmedKu
@@ -472,81 +386,91 @@ export function App() {
           </div>
 
           {/* Nav Items */}
-          <nav className={`flex flex-col gap-0.5 mt-1 flex-1 transition-all duration-300 ${sidebarHovered ? 'p-2 px-3' : 'p-2 px-2'}`}>
+          <nav className="flex flex-col gap-1 mt-2 flex-1 px-2">
             {navItemsBase.map((item) => (
               <button
                 key={item.page}
                 onClick={() => handleNavClick(item.page)}
-                className={`relative flex flex-row items-center gap-3 py-2.5 rounded-xl text-sm font-medium transition-all w-full group ${
-                  sidebarHovered ? 'px-3' : 'px-0 justify-center'
-                } ${
+                className={`relative flex items-center h-11 rounded-xl text-sm font-medium transition-all duration-200 w-full group ${
                   currentPage === item.page
-                    ? 'text-blue-600 bg-blue-50/80'
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50/80'
+                    ? 'text-blue-600 bg-blue-50/90'
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100/60'
                 }`}
               >
-                <span className="relative flex-shrink-0">
-                  {item.icon}
-                  <NotificationBadge count={item.badge} />
-                </span>
+                {/* Icon container - selalu center di 68px */}
+                <div className="flex items-center justify-center w-[52px] flex-shrink-0">
+                  <span className="relative">
+                    {item.icon}
+                    <NotificationBadge count={item.badge} />
+                  </span>
+                </div>
+
+                {/* Label */}
                 <span
-                  className={`flex-1 text-left whitespace-nowrap transition-all duration-300 overflow-hidden ${
-                    sidebarHovered ? 'opacity-100 max-w-[200px]' : 'opacity-0 max-w-0'
+                  className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${
+                    sidebarHovered ? 'opacity-100 w-auto' : 'opacity-0 w-0'
                   }`}
                 >
                   {item.label}
                 </span>
+
+                {/* Badge count di kanan saat expanded */}
                 {sidebarHovered && item.badge > 0 && (
-                  <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white transition-all duration-200">
+                  <span className="ml-auto mr-3 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white animate-in fade-in duration-200">
                     {item.badge > 99 ? '99+' : item.badge}
                   </span>
                 )}
 
-                {/* Tooltip when collapsed */}
+                {/* Tooltip saat collapsed */}
                 {!sidebarHovered && (
-                  <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap z-[100] shadow-xl">
-                    {item.label}
-                    {item.badge > 0 && (
-                      <span className="ml-1.5 inline-flex items-center justify-center h-4 min-w-[16px] rounded-full bg-red-500 px-1 text-[10px]">
-                        {item.badge > 99 ? '99+' : item.badge}
-                      </span>
-                    )}
-                    <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
+                  <div className="absolute left-[calc(100%+8px)] px-2.5 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg opacity-0 invisible pointer-events-none group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-[100] shadow-xl">
+                    <div className="flex items-center gap-1.5">
+                      {item.label}
+                      {item.badge > 0 && (
+                        <span className="inline-flex items-center justify-center h-4 min-w-[16px] rounded-full bg-red-500 px-1 text-[10px] font-bold">
+                          {item.badge > 99 ? '99+' : item.badge}
+                        </span>
+                      )}
+                    </div>
+                    <div className="absolute right-full top-1/2 -translate-y-1/2 border-[5px] border-transparent border-r-gray-900" />
                   </div>
                 )}
               </button>
             ))}
           </nav>
 
-          {/* Profile Section */}
+          {/* ===== Profile Section ===== */}
           <div className="border-t border-gray-100/60">
             <button
               onClick={() => handleNavClick('profile')}
-              className={`relative flex items-center gap-3 w-full py-3.5 transition-all duration-300 group ${
-                sidebarHovered ? 'px-4' : 'px-0 justify-center'
-              } ${
+              className={`relative flex items-center w-full h-[64px] transition-all duration-200 group ${
                 currentPage === 'profile' ? 'bg-blue-50/80' : 'hover:bg-gray-50/80'
               }`}
             >
-              <div
-                className={`relative h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold overflow-hidden flex-shrink-0 ring-2 transition-all duration-200 ${
-                  currentPage === 'profile'
-                    ? 'ring-blue-500 ring-offset-2'
-                    : 'ring-transparent hover:ring-gray-200'
-                }`}
-              >
-                {currentUser.avatar_url ? (
-                  <img src={currentUser.avatar_url} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="h-full w-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white">
-                    {currentUser.display_name.charAt(0).toUpperCase()}
-                  </div>
-                )}
-                <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 border-2 border-white" />
+              {/* Avatar container - selalu center di 68px */}
+              <div className="flex items-center justify-center w-[68px] flex-shrink-0">
+                <div
+                  className={`relative h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold overflow-hidden ring-2 transition-all duration-200 ${
+                    currentPage === 'profile'
+                      ? 'ring-blue-500 ring-offset-2'
+                      : 'ring-transparent group-hover:ring-gray-200'
+                  }`}
+                >
+                  {currentUser.avatar_url ? (
+                    <img src={currentUser.avatar_url} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="h-full w-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white">
+                      {currentUser.display_name.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 border-2 border-white" />
+                </div>
               </div>
+
+              {/* User info */}
               <div
-                className={`flex-1 min-w-0 text-left whitespace-nowrap transition-all duration-300 overflow-hidden ${
-                  sidebarHovered ? 'opacity-100 max-w-[200px]' : 'opacity-0 max-w-0'
+                className={`flex-1 min-w-0 text-left transition-all duration-300 overflow-hidden ${
+                  sidebarHovered ? 'opacity-100 w-auto' : 'opacity-0 w-0'
                 }`}
               >
                 <p className={`text-sm font-semibold truncate leading-tight ${currentPage === 'profile' ? 'text-blue-700' : 'text-gray-800'}`}>
@@ -554,23 +478,22 @@ export function App() {
                 </p>
                 <p className="text-xs text-gray-400 truncate leading-tight">@{currentUser.username}</p>
               </div>
-              <svg
-                className={`h-4 w-4 flex-shrink-0 transition-all duration-300 ${
-                  currentPage === 'profile' ? 'text-blue-500' : 'text-gray-300'
-                } ${sidebarHovered ? 'opacity-100' : 'opacity-0 w-0'}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
 
-              {/* Tooltip when collapsed */}
+              {/* Chevron */}
+              <div className={`transition-all duration-300 overflow-hidden ${sidebarHovered ? 'w-8 opacity-100 mr-2' : 'w-0 opacity-0'}`}>
+                <svg
+                  className={`h-4 w-4 ${currentPage === 'profile' ? 'text-blue-500' : 'text-gray-300'}`}
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </div>
+
+              {/* Tooltip saat collapsed */}
               {!sidebarHovered && (
-                <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap z-[100] shadow-xl">
+                <div className="absolute left-[calc(100%+8px)] px-2.5 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg opacity-0 invisible pointer-events-none group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-[100] shadow-xl">
                   {currentUser.display_name}
-                  <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
+                  <div className="absolute right-full top-1/2 -translate-y-1/2 border-[5px] border-transparent border-r-gray-900" />
                 </div>
               )}
             </button>
@@ -578,8 +501,8 @@ export function App() {
         </div>
       </aside>
 
-      {/* Main Content - fixed margin regardless of sidebar state */}
-      <main ref={mainContentRef} className={`pb-20 md:pb-0 ${sidebarExpandedWidth} min-h-screen`}>
+      {/* Main Content */}
+      <main ref={mainContentRef} className="pb-20 md:pb-0 md:ml-[68px] min-h-screen">
         <div className="h-full w-full">
           {currentPage === 'home' && (
             <HomePage
@@ -600,9 +523,7 @@ export function App() {
               onClearTarget={() => setChatTarget(null)}
             />
           )}
-          {currentPage === 'groups' && (
-            <GroupsPage currentUser={currentUser} />
-          )}
+          {currentPage === 'groups' && <GroupsPage currentUser={currentUser} />}
           {currentPage === 'search' && (
             <SearchPage
               currentUser={currentUser}
@@ -622,10 +543,7 @@ export function App() {
               viewingUser={viewingUser}
               onSetViewingUser={setViewingUser}
               onNavigateMessages={handleNavigateMessages}
-              onRefreshPosts={() => {
-                fetchPosts();
-                fetchFollowingIds();
-              }}
+              onRefreshPosts={() => { fetchPosts(); fetchFollowingIds(); }}
             />
           )}
         </div>
