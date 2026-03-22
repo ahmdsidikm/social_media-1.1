@@ -23,7 +23,7 @@ type Props = {
 };
 
 /* ═══════════════════════════════════════════
-   Reply Item (balasan komentar)
+   Reply Item (balasan komentar - tabel terpisah)
    ═══════════════════════════════════════════ */
 function ReplyItem({
   reply,
@@ -73,9 +73,9 @@ function ReplyItem({
   };
 
   return (
-    <div className="ml-10 mt-2 flex items-start gap-2 group/reply">
-      {/* Garis penghubung visual */}
-      <div className="absolute left-[2.1rem] top-0 bottom-0 w-px bg-gray-200/60" />
+    <div className="ml-10 mt-2.5 flex items-start gap-2 group/reply relative">
+      {/* Garis penghubung ke komentar induk */}
+      <div className="absolute -left-[0.35rem] top-0 w-4 h-3 border-l-2 border-b-2 border-gray-200 rounded-bl-lg" />
 
       {/* Avatar */}
       <button
@@ -91,7 +91,6 @@ function ReplyItem({
 
       <div className="flex-1 min-w-0">
         {isEditing ? (
-          /* ── Edit Mode ── */
           <div className="rounded-2xl bg-white px-3 py-2 shadow-sm border-2 border-emerald-200">
             <div className="flex items-center gap-1.5 mb-1.5">
               <span className="text-[11px] font-semibold text-gray-800">{replyName}</span>
@@ -114,9 +113,8 @@ function ReplyItem({
             </div>
           </div>
         ) : (
-          /* ── Display Mode ── */
           <>
-            <div className="rounded-2xl bg-emerald-50/50 px-3 py-2 shadow-sm border border-emerald-100/50 relative inline-block max-w-full">
+            <div className="rounded-2xl bg-emerald-50/60 px-3 py-2 shadow-sm border border-emerald-100/50 relative inline-block max-w-full">
               <div className="flex items-center gap-1 mb-0.5 flex-wrap">
                 <button
                   onClick={() => { if (onViewProfile && replyUser) onViewProfile(replyUser); }}
@@ -124,20 +122,14 @@ function ReplyItem({
                 >
                   {replyName}
                 </button>
-                {isOwner && (
-                  <span className="text-[7px] bg-emerald-100 text-emerald-500 px-1 py-0.5 rounded-full font-medium">kamu</span>
-                )}
-                {isEdited && (
-                  <span className="text-[7px] text-gray-300 italic">· diedit</span>
-                )}
+                {isOwner && <span className="text-[7px] bg-emerald-100 text-emerald-500 px-1 py-0.5 rounded-full font-medium">kamu</span>}
+                {isEdited && <span className="text-[7px] text-gray-300 italic">· diedit</span>}
               </div>
 
-              {/* Mention parent */}
+              {/* Mention siapa yang dibalas */}
               {parentCommentUser && (
                 <p className="text-[9px] text-emerald-500 mb-0.5 flex items-center gap-1">
-                  <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                  </svg>
+                  <span>↩</span>
                   <span>membalas <span className="font-semibold">{parentCommentUser.display_name}</span></span>
                 </p>
               )}
@@ -158,7 +150,7 @@ function ReplyItem({
               {isOwner && (
                 <div className="absolute top-1 right-1">
                   <button
-                    onClick={() => setShowMenu(!showMenu)}
+                    onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
                     className="h-4 w-4 rounded-full flex items-center justify-center text-gray-300 hover:text-gray-500 hover:bg-gray-100 opacity-0 group-hover/reply:opacity-100 transition-all"
                   >
                     <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24">
@@ -170,13 +162,13 @@ function ReplyItem({
                       <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
                       <div className="absolute right-0 top-5 z-20 w-32 rounded-xl bg-white shadow-xl border border-gray-100 py-1 overflow-hidden">
                         <button
-                          onClick={() => { setEditText(reply.content); setIsEditing(true); setShowMenu(false); }}
+                          onClick={(e) => { e.stopPropagation(); setEditText(reply.content); setIsEditing(true); setShowMenu(false); }}
                           className="w-full px-3 py-1.5 text-left text-[10px] text-gray-700 hover:bg-amber-50 hover:text-amber-600 flex items-center gap-1.5 transition-colors"
                         >
                           ✏️ Edit
                         </button>
                         <button
-                          onClick={() => { if (confirm('Hapus balasan ini?')) onDeleteReply(reply.id); setShowMenu(false); }}
+                          onClick={(e) => { e.stopPropagation(); if (confirm('Hapus balasan ini?')) onDeleteReply(reply.id); setShowMenu(false); }}
                           className="w-full px-3 py-1.5 text-left text-[10px] text-red-500 hover:bg-red-50 flex items-center gap-1.5 transition-colors"
                         >
                           🗑️ Hapus
@@ -188,11 +180,11 @@ function ReplyItem({
               )}
             </div>
 
-            {/* Action row */}
+            {/* Actions */}
             <div className="flex items-center gap-3 mt-0.5 px-1.5">
               <span className="text-[9px] text-gray-400">{timeAgo(reply.created_at)}</span>
               <button
-                onClick={() => onLikeReply(reply.id)}
+                onClick={(e) => { e.stopPropagation(); onLikeReply(reply.id); }}
                 className={`text-[9px] font-semibold transition active:scale-90 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}`}
               >
                 {isLiked ? '❤️ Disukai' : 'Suka'}
@@ -237,6 +229,7 @@ function CommentItem({
   const [showReplies, setShowReplies] = useState(false);
   const [isReplying, setIsReplying] = useState(false);
   const [replyText, setReplyText] = useState('');
+  const [sending, setSending] = useState(false);
   const editRef = useRef<HTMLTextAreaElement>(null);
   const replyInputRef = useRef<HTMLInputElement>(null);
 
@@ -261,7 +254,7 @@ function CommentItem({
 
   useEffect(() => {
     if (isReplying && replyInputRef.current) {
-      replyInputRef.current.focus();
+      setTimeout(() => replyInputRef.current?.focus(), 100);
     }
   }, [isReplying]);
 
@@ -273,12 +266,22 @@ function CommentItem({
     setIsEditing(false);
   };
 
-  const handleSubmitReply = () => {
-    if (replyText.trim()) {
-      onReplyComment(comment.id, replyText.trim());
+  const handleSubmitReply = async () => {
+    const trimmed = replyText.trim();
+    if (!trimmed || sending) return;
+
+    console.log('Submitting reply:', trimmed, 'to comment:', comment.id);
+    setSending(true);
+
+    try {
+      await onReplyComment(comment.id, trimmed);
       setReplyText('');
       setIsReplying(false);
-      setShowReplies(true); // auto-show replies setelah membalas
+      setShowReplies(true);
+    } catch (err) {
+      console.error('Reply failed:', err);
+    } finally {
+      setSending(false);
     }
   };
 
@@ -335,12 +338,8 @@ function CommentItem({
                   >
                     {commenterName}
                   </button>
-                  {isOwner && (
-                    <span className="text-[7px] bg-blue-100 text-blue-500 px-1 py-0.5 rounded-full font-medium">kamu</span>
-                  )}
-                  {isEdited && (
-                    <span className="text-[7px] text-gray-300 italic" title={`Diedit ${timeAgo(comment.updated_at!)}`}>· diedit</span>
-                  )}
+                  {isOwner && <span className="text-[7px] bg-blue-100 text-blue-500 px-1 py-0.5 rounded-full font-medium">kamu</span>}
+                  {isEdited && <span className="text-[7px] text-gray-300 italic" title={`Diedit ${timeAgo(comment.updated_at!)}`}>· diedit</span>}
                 </div>
                 <p className="text-[12px] text-gray-600 leading-relaxed break-words whitespace-pre-wrap">{comment.content}</p>
 
@@ -354,11 +353,11 @@ function CommentItem({
                   </div>
                 )}
 
-                {/* Menu (owner only) */}
+                {/* Menu (owner only) - SELALU TAMPIL UNTUK OWNER */}
                 {isOwner && (
                   <div className="absolute top-1.5 right-1.5">
                     <button
-                      onClick={() => setShowMenu(!showMenu)}
+                      onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
                       className="h-5 w-5 rounded-full flex items-center justify-center text-gray-300 hover:text-gray-500 hover:bg-gray-200/50 opacity-0 group-hover/comment:opacity-100 transition-all"
                     >
                       <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
@@ -368,20 +367,30 @@ function CommentItem({
                     {showMenu && (
                       <>
                         <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-                        <div className="absolute right-0 top-6 z-20 w-36 rounded-xl bg-white shadow-xl border border-gray-100 py-1 overflow-hidden">
+                        <div className="absolute right-0 top-6 z-20 w-40 rounded-xl bg-white shadow-xl border border-gray-100 py-1 overflow-hidden">
                           <button
-                            onClick={() => { setEditText(comment.content); setIsEditing(true); setShowMenu(false); }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditText(comment.content);
+                              setIsEditing(true);
+                              setShowMenu(false);
+                            }}
                             className="w-full px-3 py-2 text-left text-[11px] text-gray-700 hover:bg-amber-50 hover:text-amber-600 flex items-center gap-2 transition-colors"
                           >
-                            <span>✏️</span>
-                            <span>Edit komentar</span>
+                            ✏️ Edit komentar
                           </button>
+                          <div className="mx-2 border-t border-gray-100" />
                           <button
-                            onClick={() => { if (confirm('Hapus komentar ini?')) onDeleteComment(comment.id); setShowMenu(false); }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (confirm('Hapus komentar ini beserta semua balasannya?')) {
+                                onDeleteComment(comment.id);
+                              }
+                              setShowMenu(false);
+                            }}
                             className="w-full px-3 py-2 text-left text-[11px] text-red-500 hover:bg-red-50 flex items-center gap-2 transition-colors"
                           >
-                            <span>🗑️</span>
-                            <span>Hapus</span>
+                            🗑️ Hapus
                           </button>
                         </div>
                       </>
@@ -390,71 +399,103 @@ function CommentItem({
                 )}
               </div>
 
-              {/* Action row */}
+              {/* Action row: time, like, reply */}
               <div className="flex items-center gap-3 mt-1 px-1.5">
                 <span className="text-[10px] text-gray-400">{timeAgo(comment.created_at)}</span>
                 <button
-                  onClick={() => onLikeComment(comment.id)}
+                  onClick={(e) => { e.stopPropagation(); onLikeComment(comment.id); }}
                   className={`text-[10px] font-semibold transition active:scale-90 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}`}
                 >
                   {isLiked ? '❤️ Disukai' : 'Suka'}
                 </button>
                 <button
-                  onClick={() => { setIsReplying(!isReplying); setReplyText(''); }}
-                  className="text-[10px] font-semibold text-gray-400 hover:text-blue-500 transition"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsReplying(!isReplying);
+                    if (isReplying) setReplyText('');
+                  }}
+                  className={`text-[10px] font-semibold transition ${isReplying ? 'text-blue-500' : 'text-gray-400 hover:text-blue-500'}`}
                 >
                   💬 Balas
                 </button>
-                {likeCount > 0 && (
-                  <span className="text-[9px] text-gray-300">{likeCount} suka</span>
-                )}
               </div>
             </>
           )}
 
-          {/* ── Reply Input ── */}
+          {/* ── Reply Input Box ── */}
           {isReplying && (
-            <div className="mt-2 ml-2 flex items-center gap-2 p-2 bg-white rounded-2xl border border-blue-100 shadow-sm">
-              <div className="h-6 w-6 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0 overflow-hidden">
-                {currentUser.avatar_url ? (
-                  <img src={currentUser.avatar_url} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  currentUser.display_name.charAt(0).toUpperCase()
-                )}
+            <div className="mt-2 ml-2 rounded-2xl border border-blue-200 bg-white shadow-sm overflow-hidden">
+              <div className="px-3 py-1.5 bg-blue-50/50 border-b border-blue-100">
+                <p className="text-[9px] text-blue-500 font-medium">
+                  ↩ Membalas <span className="font-semibold">{commenterName}</span>
+                </p>
               </div>
-              <input
-                ref={replyInputRef}
-                type="text"
-                value={replyText}
-                onChange={(e) => setReplyText(e.target.value)}
-                placeholder={`Balas ${commenterName}...`}
-                className="flex-1 text-[11px] text-gray-800 placeholder-gray-400 bg-transparent outline-none"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmitReply(); }
-                  if (e.key === 'Escape') { setIsReplying(false); setReplyText(''); }
-                }}
-              />
-              <button
-                onClick={() => { setIsReplying(false); setReplyText(''); }}
-                className="text-[9px] text-gray-400 hover:text-gray-600 transition"
-              >
-                ✕
-              </button>
-              <button
-                onClick={handleSubmitReply}
-                disabled={!replyText.trim()}
-                className="h-6 w-6 rounded-full bg-blue-500 text-white flex items-center justify-center hover:bg-blue-600 transition disabled:opacity-30 active:scale-90"
-              >
-                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-              </button>
+              <div className="flex items-center gap-2 p-2">
+                <div className="h-6 w-6 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0 overflow-hidden">
+                  {currentUser.avatar_url ? (
+                    <img src={currentUser.avatar_url} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    currentUser.display_name.charAt(0).toUpperCase()
+                  )}
+                </div>
+                <input
+                  ref={replyInputRef}
+                  type="text"
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  placeholder={`Tulis balasan untuk ${commenterName}...`}
+                  className="flex-1 text-[11px] text-gray-800 placeholder-gray-400 bg-gray-50 rounded-full px-3 py-1.5 border border-gray-200 focus:border-blue-300 focus:outline-none focus:ring-1 focus:ring-blue-100 transition"
+                  disabled={sending}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleSubmitReply();
+                    }
+                    if (e.key === 'Escape') {
+                      setIsReplying(false);
+                      setReplyText('');
+                    }
+                  }}
+                />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsReplying(false);
+                    setReplyText('');
+                  }}
+                  className="text-[9px] text-gray-400 hover:text-gray-600 transition flex-shrink-0 px-1"
+                >
+                  ✕
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleSubmitReply();
+                  }}
+                  disabled={!replyText.trim() || sending}
+                  className="h-7 w-7 rounded-full bg-blue-500 text-white flex items-center justify-center hover:bg-blue-600 transition disabled:opacity-30 active:scale-90 flex-shrink-0"
+                >
+                  {sending ? (
+                    <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  ) : (
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </div>
           )}
 
-          {/* ── Replies Section ── */}
+          {/* ── Replies Section (dari tabel comment_replies) ── */}
           {replyCount > 0 && (
-            <div className="mt-1.5">
+            <div className="mt-1.5 relative">
+              {/* Garis vertikal penghubung */}
+              <div className="absolute left-[0.55rem] top-0 bottom-2 w-px bg-gray-200/80" />
+
               {!showReplies ? (
                 <button
                   onClick={() => setShowReplies(true)}
@@ -470,32 +511,28 @@ function CommentItem({
                 <>
                   <button
                     onClick={() => setShowReplies(false)}
-                    className="flex items-center gap-1.5 text-[10px] font-medium text-gray-400 hover:text-gray-600 transition ml-2 mt-1"
+                    className="flex items-center gap-1.5 text-[10px] font-medium text-gray-400 hover:text-gray-600 transition ml-2 mt-1 mb-1"
                   >
                     <div className="w-5 h-px bg-gray-300" />
-                    <span>Sembunyikan balasan</span>
+                    <span>Sembunyikan {replyCount} balasan</span>
                     <svg className="h-2.5 w-2.5 rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                     </svg>
                   </button>
-                  <div className="relative">
-                    {/* Garis vertikal penghubung */}
-                    <div className="absolute left-[1.05rem] top-0 bottom-0 w-px bg-gray-200/60" />
-                    {replies
-                      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-                      .map((reply) => (
-                        <ReplyItem
-                          key={reply.id}
-                          reply={reply}
-                          currentUser={currentUser}
-                          parentCommentUser={comment.users}
-                          onViewProfile={onViewProfile}
-                          onDeleteReply={onDeleteReply}
-                          onEditReply={onEditReply}
-                          onLikeReply={onLikeReply}
-                        />
-                      ))}
-                  </div>
+                  {replies
+                    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                    .map((reply) => (
+                      <ReplyItem
+                        key={reply.id}
+                        reply={reply}
+                        currentUser={currentUser}
+                        parentCommentUser={comment.users}
+                        onViewProfile={onViewProfile}
+                        onDeleteReply={onDeleteReply}
+                        onEditReply={onEditReply}
+                        onLikeReply={onLikeReply}
+                      />
+                    ))}
                 </>
               )}
             </div>
@@ -549,44 +586,32 @@ export function PostCard({
 
   const MAX_VISIBLE_LIKERS = 5;
 
-  // Hitung total komentar + replies
   const allComments = post.comments || [];
   const totalReplies = allComments.reduce((sum, c) => sum + (c.comment_replies?.length || 0), 0);
   const totalInteractions = allComments.length + totalReplies;
 
-  const topLevelComments = allComments
-    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-
-  const visibleTopComments = topLevelComments.slice(0, visibleCommentsCount);
-  const hasMoreComments = topLevelComments.length > visibleCommentsCount;
-  const hiddenCommentsCount = topLevelComments.length - visibleCommentsCount;
+  const sortedComments = [...allComments].sort((a, b) =>
+    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
+  const visibleComments = sortedComments.slice(0, visibleCommentsCount);
+  const hasMoreComments = sortedComments.length > visibleCommentsCount;
+  const hiddenCount = sortedComments.length - visibleCommentsCount;
 
   const fetchLikerUsers = useCallback(async () => {
-    if (!post.likes || post.likes.length === 0) return;
-    if (likersFetched) return;
+    if (!post.likes || post.likes.length === 0 || likersFetched) return;
     setLikersLoading(true);
     try {
       const ids = post.likes.map((l: Like) => l.user_id);
       const { data } = await supabase.from('users').select('*').in('id', ids);
       setLikerUsers(data || []);
       setLikersFetched(true);
-    } catch {
-      setLikerUsers([]);
-    }
+    } catch { setLikerUsers([]); }
     setLikersLoading(false);
   }, [post.likes, likersFetched]);
 
-  useEffect(() => {
-    if (likeCount > 0 && !likersFetched) fetchLikerUsers();
-  }, [likeCount, likersFetched, fetchLikerUsers]);
-
+  useEffect(() => { if (likeCount > 0 && !likersFetched) fetchLikerUsers(); }, [likeCount, likersFetched, fetchLikerUsers]);
   useEffect(() => { setLikersFetched(false); }, [likeCount]);
-
-  useEffect(() => {
-    if (!showComments) {
-      setVisibleCommentsCount(COMMENTS_PER_PAGE);
-    }
-  }, [showComments]);
+  useEffect(() => { if (!showComments) setVisibleCommentsCount(COMMENTS_PER_PAGE); }, [showComments]);
 
   const handleSubmitComment = (e: React.FormEvent) => {
     e.preventDefault();
@@ -596,33 +621,24 @@ export function PostCard({
     }
   };
 
-  const handleAuthorClick = () => {
-    if (onViewProfile && post.users) onViewProfile(post.users);
-  };
-
-  const handleLikeClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onLike(post.id);
-  };
-
   const visibleLikers = likerUsers.slice(0, MAX_VISIBLE_LIKERS);
   const remainingLikersCount = likerUsers.length - MAX_VISIBLE_LIKERS;
 
   return (
     <div className="bg-white border-b border-gray-100">
-      {/* ══════════ Header ══════════ */}
+      {/* Header */}
       <div className="flex items-center gap-3 px-4 pt-4 pb-2">
         <button
-          onClick={handleAuthorClick}
+          onClick={() => { if (onViewProfile && post.users) onViewProfile(post.users); }}
           className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm overflow-hidden flex-shrink-0 hover:ring-2 hover:ring-blue-300 transition"
         >
-          {authorAvatar ? (<img src={authorAvatar} alt="" className="h-full w-full object-cover" />) : (authorName.charAt(0).toUpperCase())}
+          {authorAvatar ? <img src={authorAvatar} alt="" className="h-full w-full object-cover" /> : authorName.charAt(0).toUpperCase()}
         </button>
-        <button onClick={handleAuthorClick} className="flex-1 min-w-0 text-left hover:opacity-80 transition">
+        <button onClick={() => { if (onViewProfile && post.users) onViewProfile(post.users); }} className="flex-1 min-w-0 text-left hover:opacity-80 transition">
           <p className="text-sm font-semibold text-gray-900 truncate">{authorName}</p>
           <p className="text-xs text-gray-400">
             @{authorUsername} · {timeAgo(post.created_at)}
-            {isEdited && (<span className="ml-1 text-gray-300">· <span className="italic">diedit</span></span>)}
+            {isEdited && <span className="ml-1 text-gray-300">· <span className="italic">diedit</span></span>}
           </p>
         </button>
         {isOwner && (
@@ -633,21 +649,14 @@ export function PostCard({
             {showMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-                <div className="absolute right-0 top-8 z-20 w-44 rounded-2xl bg-white shadow-xl border border-gray-100 py-1.5 overflow-hidden">
+                <div className="absolute right-0 top-8 z-20 w-44 rounded-2xl bg-white shadow-xl border border-gray-100 py-1.5">
                   {onEditPost && (
                     <>
-                      <button onClick={() => { onEditPost(post); setShowMenu(false); }} className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-amber-50 hover:text-amber-600 flex items-center gap-2.5 transition-colors">
-                        ✏️ Edit
-                      </button>
+                      <button onClick={() => { onEditPost(post); setShowMenu(false); }} className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-amber-50 hover:text-amber-600 flex items-center gap-2.5 transition-colors">✏️ Edit</button>
                       <div className="mx-3 my-0.5 border-t border-gray-100" />
                     </>
                   )}
-                  <button
-                    onClick={() => { if (confirm('Hapus postingan ini?')) onDeletePost(post.id); setShowMenu(false); }}
-                    className="w-full px-4 py-2.5 text-left text-sm text-red-500 hover:bg-red-50 flex items-center gap-2.5 transition-colors"
-                  >
-                    🗑️ Hapus
-                  </button>
+                  <button onClick={() => { if (confirm('Hapus postingan ini?')) onDeletePost(post.id); setShowMenu(false); }} className="w-full px-4 py-2.5 text-left text-sm text-red-500 hover:bg-red-50 flex items-center gap-2.5 transition-colors">🗑️ Hapus</button>
                 </div>
               </>
             )}
@@ -655,27 +664,21 @@ export function PostCard({
         )}
       </div>
 
-      {/* ══════════ Content ══════════ */}
+      {/* Content */}
       {post.content && (
         <div className="px-4 py-2">
           <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{post.content}</p>
         </div>
       )}
 
-      {/* ══════════ Image ══════════ */}
+      {/* Image */}
       {post.image_url && !isVideo && (
-        <div className="mt-1 relative">
-          <img
-            src={post.image_url}
-            alt="Post"
-            className="w-full max-h-[80vh] object-contain cursor-pointer hover:brightness-[0.92] transition-all duration-200"
-            loading="lazy"
-            onClick={(e) => { e.stopPropagation(); setShowLightbox(true); }}
-          />
+        <div className="mt-1">
+          <img src={post.image_url} alt="Post" className="w-full max-h-[80vh] object-contain cursor-pointer hover:brightness-[0.92] transition" loading="lazy" onClick={() => setShowLightbox(true)} />
         </div>
       )}
 
-      {/* ══════════ Video ══════════ */}
+      {/* Video */}
       {isVideo && (
         <div className="mt-1">
           <video src={post.video_url} controls className="w-full max-h-[500px] bg-black" preload="metadata" />
@@ -686,10 +689,10 @@ export function PostCard({
         <ImageLightbox src={post.image_url} alt={`Foto dari ${authorName}`} onClose={() => setShowLightbox(false)} />
       )}
 
-      {/* ══════════ Like & Comment Buttons ══════════ */}
+      {/* Like & Comment Buttons */}
       <div className="flex border-t border-gray-50">
         <button
-          onClick={handleLikeClick}
+          onClick={(e) => { e.stopPropagation(); onLike(post.id); }}
           className={`flex flex-1 items-center justify-center gap-2 py-3 text-sm font-medium transition-all active:scale-95 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}`}
         >
           {isLiked ? (
@@ -698,9 +701,7 @@ export function PostCard({
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
           )}
           <span>{isLiked ? 'Disukai' : 'Suka'}</span>
-          {likeCount > 0 && (
-            <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${isLiked ? 'bg-red-50 text-red-500' : 'bg-gray-100 text-gray-500'}`}>{likeCount}</span>
-          )}
+          {likeCount > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${isLiked ? 'bg-red-50 text-red-500' : 'bg-gray-100 text-gray-500'}`}>{likeCount}</span>}
         </button>
         <button
           onClick={() => setShowComments(!showComments)}
@@ -708,13 +709,11 @@ export function PostCard({
         >
           <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
           <span>Komentar</span>
-          {totalInteractions > 0 && (
-            <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${showComments ? 'bg-blue-50 text-blue-500' : 'bg-gray-100 text-gray-500'}`}>{totalInteractions}</span>
-          )}
+          {totalInteractions > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${showComments ? 'bg-blue-50 text-blue-500' : 'bg-gray-100 text-gray-500'}`}>{totalInteractions}</span>}
         </button>
       </div>
 
-      {/* ══════════ Likers Row ══════════ */}
+      {/* Likers */}
       {likeCount > 0 && (
         <div className="px-4 py-2.5 border-t border-gray-50">
           <div className="flex items-center gap-2">
@@ -726,68 +725,47 @@ export function PostCard({
             ) : (
               <>
                 <div className="flex -space-x-2">
-                  {visibleLikers.map((user) => (
-                    <button
-                      key={user.id}
-                      onClick={() => { if (onViewProfile) onViewProfile(user); }}
-                      className="relative h-7 w-7 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold overflow-hidden flex-shrink-0 ring-2 ring-white hover:ring-pink-200 hover:z-10 hover:scale-110 transition-all duration-200 shadow-sm"
-                      title={user.display_name}
-                    >
-                      {user.avatar_url ? (<img src={user.avatar_url} alt="" className="h-full w-full object-cover" />) : (user.display_name.charAt(0).toUpperCase())}
+                  {visibleLikers.map(user => (
+                    <button key={user.id} onClick={() => { if (onViewProfile) onViewProfile(user); }} className="relative h-7 w-7 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold overflow-hidden flex-shrink-0 ring-2 ring-white hover:ring-pink-200 hover:z-10 hover:scale-110 transition-all shadow-sm" title={user.display_name}>
+                      {user.avatar_url ? <img src={user.avatar_url} alt="" className="h-full w-full object-cover" /> : user.display_name.charAt(0).toUpperCase()}
                     </button>
                   ))}
                 </div>
                 <div className="ml-2.5 flex-1 min-w-0">
                   <p className="text-xs text-gray-500 truncate">
-                    <span className="font-semibold text-gray-700">
-                      {visibleLikers.slice(0, 2).map(u => u.id === currentUser.id ? 'Kamu' : u.display_name).join(', ')}
-                    </span>
-                    {likerUsers.length > 2 && (<span>{' '}dan <span className="font-semibold text-gray-700">{likerUsers.length - 2} lainnya</span></span>)}
+                    <span className="font-semibold text-gray-700">{visibleLikers.slice(0, 2).map(u => u.id === currentUser.id ? 'Kamu' : u.display_name).join(', ')}</span>
+                    {likerUsers.length > 2 && <span> dan <span className="font-semibold text-gray-700">{likerUsers.length - 2} lainnya</span></span>}
                     {likerUsers.length <= 2 && <span className="text-gray-400"> menyukai ini</span>}
                   </p>
                 </div>
                 {remainingLikersCount > 0 && (
-                  <button
-                    onClick={() => setShowAllLikers(!showAllLikers)}
-                    className="ml-2 flex items-center gap-1 text-xs font-medium text-pink-500 hover:text-pink-600 bg-pink-50 hover:bg-pink-100 px-2.5 py-1 rounded-full transition-all flex-shrink-0"
-                  >
+                  <button onClick={() => setShowAllLikers(!showAllLikers)} className="ml-2 flex items-center gap-1 text-xs font-medium text-pink-500 bg-pink-50 hover:bg-pink-100 px-2.5 py-1 rounded-full transition flex-shrink-0">
                     <span>+{remainingLikersCount}</span>
-                    <svg className={`h-3 w-3 transition-transform ${showAllLikers ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
                   </button>
                 )}
               </>
             )}
           </div>
 
-          {/* All likers expanded */}
           {showAllLikers && remainingLikersCount > 0 && (
             <div className="mt-3 rounded-2xl bg-gray-50/80 border border-gray-100 overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                <div className="flex items-center gap-2">
-                  <div className="h-6 w-6 rounded-full bg-gradient-to-br from-red-400 to-pink-500 flex items-center justify-center">
-                    <svg className="h-3 w-3 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg>
-                  </div>
-                  <p className="text-xs font-semibold text-gray-600">Disukai oleh {likeCount} orang</p>
-                </div>
-                <button onClick={() => setShowAllLikers(false)} className="text-gray-400 hover:text-gray-600 transition">
+                <p className="text-xs font-semibold text-gray-600">❤️ Disukai oleh {likeCount} orang</p>
+                <button onClick={() => setShowAllLikers(false)} className="text-gray-400 hover:text-gray-600">
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
               <div className="max-h-48 overflow-y-auto p-2" style={{ scrollbarWidth: 'thin' }}>
                 {likerUsers.map(user => (
-                  <button
-                    key={user.id}
-                    onClick={() => { if (onViewProfile) onViewProfile(user); setShowAllLikers(false); }}
-                    className="flex w-full items-center gap-3 p-2.5 hover:bg-white rounded-xl transition group text-left"
-                  >
-                    <div className="h-9 w-9 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-xs overflow-hidden flex-shrink-0 shadow-sm group-hover:scale-105 transition-all">
-                      {user.avatar_url ? (<img src={user.avatar_url} alt="" className="h-full w-full object-cover" />) : (user.display_name.charAt(0).toUpperCase())}
+                  <button key={user.id} onClick={() => { if (onViewProfile) onViewProfile(user); setShowAllLikers(false); }} className="flex w-full items-center gap-3 p-2.5 hover:bg-white rounded-xl transition text-left">
+                    <div className="h-9 w-9 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-xs overflow-hidden flex-shrink-0 shadow-sm">
+                      {user.avatar_url ? <img src={user.avatar_url} alt="" className="h-full w-full object-cover" /> : user.display_name.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-800 truncate">{user.display_name}</p>
                       <p className="text-[11px] text-gray-400 truncate">@{user.username}</p>
                     </div>
-                    {user.id === currentUser.id && (<span className="text-[10px] bg-gradient-to-r from-pink-500 to-red-500 text-white px-2 py-0.5 rounded-full font-medium shadow-sm flex-shrink-0">Kamu</span>)}
+                    {user.id === currentUser.id && <span className="text-[10px] bg-pink-500 text-white px-2 py-0.5 rounded-full font-medium flex-shrink-0">Kamu</span>}
                   </button>
                 ))}
               </div>
@@ -796,26 +774,18 @@ export function PostCard({
         </div>
       )}
 
-      {/* ══════════ Comments Section ══════════ */}
+      {/* Comments Section */}
       {showComments && (
         <div className="border-t border-gray-50 bg-gray-50/30">
-          {/* Load more */}
           {hasMoreComments && (
-            <button
-              onClick={() => setVisibleCommentsCount(prev => prev + COMMENTS_PER_PAGE)}
-              className="w-full py-2.5 text-xs font-medium text-blue-500 hover:text-blue-600 hover:bg-blue-50/50 transition flex items-center justify-center gap-1.5"
-            >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
-              </svg>
-              <span>Lihat {hiddenCommentsCount} komentar lainnya</span>
+            <button onClick={() => setVisibleCommentsCount(prev => prev + COMMENTS_PER_PAGE)} className="w-full py-2.5 text-xs font-medium text-blue-500 hover:bg-blue-50/50 transition flex items-center justify-center gap-1.5">
+              ▲ Lihat {hiddenCount} komentar lainnya
             </button>
           )}
 
-          {/* Comments list */}
-          {topLevelComments.length > 0 ? (
+          {sortedComments.length > 0 ? (
             <div className="overflow-y-auto px-4 pt-3 pb-2 space-y-4" style={{ maxHeight: '500px', scrollbarWidth: 'thin' }}>
-              {visibleTopComments.map((comment: Comment) => (
+              {visibleComments.map(comment => (
                 <CommentItem
                   key={comment.id}
                   comment={comment}
@@ -846,21 +816,19 @@ export function PostCard({
           {/* Comment input */}
           <form onSubmit={handleSubmitComment} className="flex items-center gap-2.5 p-3 border-t border-gray-100/50 bg-white">
             <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0 overflow-hidden shadow-sm">
-              {currentUser.avatar_url ? (<img src={currentUser.avatar_url} alt="" className="h-full w-full object-cover" />) : (currentUser.display_name.charAt(0).toUpperCase())}
+              {currentUser.avatar_url ? <img src={currentUser.avatar_url} alt="" className="h-full w-full object-cover" /> : currentUser.display_name.charAt(0).toUpperCase()}
             </div>
-            <div className="flex-1">
-              <input
-                type="text"
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Tulis komentar..."
-                className="w-full rounded-full border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 placeholder-gray-400 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-50 transition"
-              />
-            </div>
+            <input
+              type="text"
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
+              placeholder="Tulis komentar..."
+              className="flex-1 rounded-full border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 placeholder-gray-400 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-50 transition"
+            />
             <button
               type="submit"
               disabled={!commentText.trim()}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-purple-600 text-white shadow-md hover:shadow-lg hover:scale-105 transition-all disabled:opacity-30 disabled:hover:scale-100 flex-shrink-0 active:scale-95"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-purple-600 text-white shadow-md hover:shadow-lg hover:scale-105 transition-all disabled:opacity-30 flex-shrink-0 active:scale-95"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
