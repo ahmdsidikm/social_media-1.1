@@ -52,7 +52,6 @@ export function ProfilePage({
   const [selectedPhotoPost, setSelectedPhotoPost] = useState<Post | null>(null);
   const [cropPostImage, setCropPostImage] = useState<string | null>(null);
 
-  // Edit post states
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [editPostContent, setEditPostContent] = useState('');
   const [editPostImgFile, setEditPostImgFile] = useState<File | null>(null);
@@ -76,8 +75,7 @@ export function ProfilePage({
   const isOwnProfile = !viewingUser || viewingUser.id === currentUser.id;
   const photoPosts = myPosts.filter((p) => p.image_url && p.image_url.length > 0);
 
-  // Cover aspect ratio: match the cover area (h-36 sm:h-44, full width ~16:9 area)
-  const COVER_ASPECT_RATIO = 16 / 5;
+  const COVER_ASPECT_RATIO = 16 / 9;
 
   const fetchFollowData = useCallback(async () => {
     const { count: fCount } = await supabase
@@ -199,7 +197,6 @@ export function ProfilePage({
     if (!error && data) onUserUpdate(data);
   };
 
-  // Cover: select file → open cropper
   const handleCoverSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -211,7 +208,6 @@ export function ProfilePage({
     if (coverInputRef.current) coverInputRef.current.value = '';
   };
 
-  // Cover: upload cropped blob
   const handleCroppedCover = async (blob: Blob) => {
     setCropCoverImage(null);
     setCoverUploading(true);
@@ -408,7 +404,6 @@ export function ProfilePage({
 
   const hasStory = stories.length > 0;
 
-  // Helper: navigate to profile and scroll to top
   const handleViewProfile = (user: User) => {
     if (user.id === currentUser.id) {
       onSetViewingUser(null);
@@ -445,11 +440,20 @@ export function ProfilePage({
     <div>
       {/* Profile Header */}
       <div className="mb-0 bg-white overflow-hidden">
-        {/* Cover */}
-        <div className="h-36 sm:h-44 relative bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 overflow-hidden group">
-          {displayUser.cover_url && (
-            <img src={displayUser.cover_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
+        {/* Cover - 16:9 aspect ratio */}
+        <div className="relative w-full overflow-hidden group" style={{ aspectRatio: '16/9' }}>
+          {displayUser.cover_url ? (
+            <img
+              src={displayUser.cover_url}
+              alt="Cover"
+              className="absolute inset-0 w-full h-full object-cover cursor-pointer"
+              onClick={() => setLightboxImg(displayUser.cover_url)}
+            />
+          ) : (
+            <div className="absolute inset-0 bg-gradient-to-br from-blue-400 via-purple-500 to-pink-500" />
           )}
+
+          {/* Cover overlay & buttons */}
           {isOwnProfile && (
             <>
               <input ref={coverInputRef} type="file" accept="image/*" onChange={handleCoverSelect} className="hidden" />
@@ -477,10 +481,12 @@ export function ProfilePage({
                   )}
                 </div>
               </div>
+
+              {/* Mobile cover button */}
               <button
                 onClick={() => coverInputRef.current?.click()}
                 disabled={coverUploading}
-                className="md:hidden absolute bottom-2 right-2 flex items-center gap-1.5 rounded-lg bg-black/40 px-2.5 py-1.5 text-xs text-white backdrop-blur-sm hover:bg-black/60 transition disabled:opacity-50"
+                className="md:hidden absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-black/40 px-2.5 py-1.5 text-xs text-white backdrop-blur-sm hover:bg-black/60 transition disabled:opacity-50"
               >
                 {coverUploading ? (
                   <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
@@ -491,6 +497,18 @@ export function ProfilePage({
               </button>
             </>
           )}
+
+          {/* Ratio badge */}
+          {displayUser.cover_url && (
+            <div className="absolute top-3 right-3 flex items-center gap-1 rounded-lg bg-black/30 backdrop-blur-sm px-2 py-1 pointer-events-none">
+              <svg className="h-3 w-3 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <span className="text-[10px] text-white/80 font-medium">16:9</span>
+            </div>
+          )}
+
+          {/* Back button */}
           {viewingUser && (
             <button
               onClick={() => onSetViewingUser(null)}
@@ -1071,7 +1089,7 @@ export function ProfilePage({
         />
       )}
 
-      {/* Cover Cropper (16:5 - matches cover area ratio) */}
+      {/* Cover Cropper (16:9) */}
       {cropCoverImage && (
         <ImageCropper
           imageSrc={cropCoverImage}
