@@ -64,6 +64,9 @@ export function ProfilePage({
   const [editKeepOriginalImage, setEditKeepOriginalImage] = useState(true);
   const [editKeepOriginalVideo, setEditKeepOriginalVideo] = useState(true);
 
+  // Navigation history stack for back button
+  const [profileHistory, setProfileHistory] = useState<(User | null)[]>([]);
+
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const postFileRef = useRef<HTMLInputElement>(null);
@@ -461,14 +464,45 @@ export function ProfilePage({
 
   const hasStory = stories.length > 0;
 
+  // Navigate to a user's profile with history tracking
   const handleViewProfile = (user: User) => {
     if (user.id === currentUser.id) {
+      // Going to own profile - push current state to history then clear viewing user
+      if (viewingUser) {
+        setProfileHistory(prev => [...prev, viewingUser]);
+      }
       onSetViewingUser(null);
     } else if (user.id !== displayUser.id) {
+      // Going to a different user's profile - push current state to history
+      setProfileHistory(prev => [...prev, viewingUser]);
       onSetViewingUser(user);
     }
     window.scrollTo({ top: 0, behavior: 'instant' });
   };
+
+  // Go back to the previous profile in history
+  const handleGoBack = () => {
+    if (profileHistory.length > 0) {
+      const prevUser = profileHistory[profileHistory.length - 1];
+      setProfileHistory(prev => prev.slice(0, -1));
+      onSetViewingUser(prevUser);
+    } else {
+      onSetViewingUser(null);
+    }
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  };
+
+  // Reset history when viewingUser is set externally (e.g., from feed)
+  const prevViewingUserRef = useRef<User | null>(viewingUser);
+  useEffect(() => {
+    // If viewingUser changed externally (not from our internal navigation),
+    // we detect this by checking if the change wasn't triggered by handleViewProfile or handleGoBack
+    // We only reset history when going from null to a user (fresh navigation from feed/other page)
+    if (viewingUser && !prevViewingUserRef.current && profileHistory.length === 0) {
+      // Fresh navigation from outside - history is already empty, nothing to do
+    }
+    prevViewingUserRef.current = viewingUser;
+  }, [viewingUser, profileHistory.length]);
 
   const UserPopupItem = ({ user }: { user: User }) => (
     <button
@@ -564,7 +598,7 @@ export function ProfilePage({
 
           {viewingUser && (
             <button
-              onClick={() => onSetViewingUser(null)}
+              onClick={handleGoBack}
               className="absolute top-3 left-3 flex items-center gap-1 rounded-lg bg-black/30 px-3 py-1.5 text-xs text-white backdrop-blur-sm hover:bg-black/50 transition"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
