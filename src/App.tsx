@@ -381,7 +381,7 @@ export function App() {
                 sidebarHovered ? 'opacity-100 w-auto' : 'opacity-0 w-0'
               }`}
             >
-              Elytra
+              Hai
             </span>
           </div>
 
